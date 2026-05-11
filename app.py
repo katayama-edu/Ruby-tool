@@ -710,6 +710,44 @@ if uploaded_file is not None:
 st.divider()
 st.caption("ルビの読みはSudachiPy（全辞書）を使用しています。付与後に内容をご確認ください。")
 
+with st.expander("💬 ご意見・ご要望・不具合報告"):
+    st.write(
+        "お気づきの点や改善のご要望、不具合などがあればお知らせください。"
+        "いただいた内容は開発者が確認し、ツールの改善に役立てます。"
+    )
+    feedback_name = st.text_input("お名前（任意）", key="feedback_name")
+    feedback_type = st.radio(
+        "種類",
+        options=["不具合の報告", "改善・修正のご要望", "新機能のリクエスト", "その他"],
+        horizontal=True,
+        key="feedback_type"
+    )
+    feedback_msg = st.text_area(
+        "内容",
+        placeholder="例：〇〇のときにルビがうまく振られませんでした。／〇〇の機能を追加してほしいです。",
+        key="feedback_msg"
+    )
+    if st.button("📨 送信する", key="feedback_btn"):
+        if not feedback_msg.strip():
+            st.warning("内容を入力してください。")
+        else:
+            import urllib.request, urllib.parse
+            data = urllib.parse.urlencode({
+                "name": feedback_name or "匿名",
+                "message": f"【{feedback_type}】\n\n{feedback_msg}",
+                "_subject": f"【ルビふりくん】{feedback_type}",
+            }).encode()
+            req = urllib.request.Request(
+                "https://formspree.io/f/mykolpee",
+                data=data,
+                headers={"Accept": "application/json"},
+            )
+            try:
+                urllib.request.urlopen(req)
+                st.success("✅ 送信しました。ありがとうございます！")
+            except Exception:
+                st.warning("送信に失敗しました。時間をおいて再度お試しください。")
+
 st.markdown("""
 <style>
 .rubifuri-kun {
