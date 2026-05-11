@@ -1092,7 +1092,7 @@ if st.session_state.get("result_bytes"):
     st.session_state.result_name = None
 
 st.divider()
-st.caption("ルビの読みはSudachiPy（全辞書）を使用しています。付与後に内容をご確認ください。")
+st.markdown("<p style='color:#ccc; font-size:0.7rem; text-align:center;'>ルビの読みは自動解析です。付与後に内容をご確認ください。</p>", unsafe_allow_html=True)
 
 st.markdown("<div style='margin-top:48px;'></div>", unsafe_allow_html=True)
 
