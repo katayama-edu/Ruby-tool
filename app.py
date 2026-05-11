@@ -51,6 +51,10 @@ def load_tokenizer():
 DEFAULT_BASE_TEXT_SIZE = 24
 DEFAULT_RUBY_FONT = "游明朝"
 
+# ────────────────────────────────────────────────
+# 横書き：ルビ書式パラメータ
+# ────────────────────────────────────────────────
+
 def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
     if sz_hpt is not None:
         base = sz_hpt
@@ -67,6 +71,30 @@ def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
     else:
         hps_raise = max(24, int(base * 1.0))
     return hps, hps_raise, hps_base_text
+
+# ────────────────────────────────────────────────
+# 縦書き：ルビ書式パラメータ
+# ────────────────────────────────────────────────
+
+def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24):
+    """
+    縦書き用ルビパラメータ。
+    実ファイル解析より：
+      hpsBaseText = sz（横書きと同じ）
+      hps         = ceil(szCs / 2)  ← szCs基準
+      hpsRaise    = 20固定
+      rt sz       = szCs // 3       ← 縦書き特有（約1/3）
+      rt szCs     = szCs            ← 本文と同値
+    """
+    sz   = sz_hpt   if sz_hpt   is not None else doc_default_hpt
+    szCs = szCs_hpt if szCs_hpt is not None else doc_default_hpt
+
+    hps_base_text = sz
+    hps = max(8, -(-szCs // 2))  # ceil(szCs/2)
+    hps_raise = 20               # 縦書きは固定
+    rt_sz   = max(7, szCs // 3)
+    rt_szCs = szCs
+    return hps, hps_raise, hps_base_text, rt_sz, rt_szCs
 
 
 def get_run_color(rpr_elem):
@@ -393,11 +421,111 @@ def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, r
     ruby.append(ruby_base_elem)
     return ruby
 
+
+def make_ruby_element_tate(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black"):
+    """縦書き用ルビ要素生成（rt sz/szCs を縦書き仕様に設定）"""
+    hps, hps_raise, hps_base_text, rt_sz, rt_szCs = get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt)
+    font_info = get_run_font_info(rpr_elem, theme_fonts)
+
+    ea_font    = font_info['eastAsia'] or DEFAULT_RUBY_FONT
+    ruby_font  = ea_font
+    ruby_ascii = font_info['ascii'] or ea_font
+    ruby_hansi = font_info['hAnsi'] or ea_font
+
+    ruby_color = None
+    if color_mode == "match":
+        ruby_color = get_run_color(rpr_elem)
+
+    ruby = OxmlElement("w:ruby")
+    ruby_pr = OxmlElement("w:rubyPr")
+    ruby_align = OxmlElement("w:rubyAlign")
+    ruby_align.set(qn("w:val"), "distributeSpace")
+    ruby_pr.append(ruby_align)
+    hps_elem = OxmlElement("w:hps")
+    hps_elem.set(qn("w:val"), str(hps))
+    ruby_pr.append(hps_elem)
+    hps_raise_elem = OxmlElement("w:hpsRaise")
+    hps_raise_elem.set(qn("w:val"), str(hps_raise))
+    ruby_pr.append(hps_raise_elem)
+    hps_base_elem = OxmlElement("w:hpsBaseText")
+    hps_base_elem.set(qn("w:val"), str(hps_base_text))
+    ruby_pr.append(hps_base_elem)
+    lid = OxmlElement("w:lid")
+    lid.set(qn("w:val"), "ja-JP")
+    ruby_pr.append(lid)
+    ruby.append(ruby_pr)
+
+    rt = OxmlElement("w:rt")
+    rt_run = OxmlElement("w:r")
+    rt_rpr = OxmlElement("w:rPr")
+    rt_rfonts = OxmlElement("w:rFonts")
+    rt_rfonts.set(qn("w:ascii"),    ruby_ascii)
+    rt_rfonts.set(qn("w:hAnsi"),    ruby_hansi)
+    rt_rfonts.set(qn("w:eastAsia"), ruby_font)
+    rt_rpr.append(rt_rfonts)
+    if ruby_color:
+        rt_color = OxmlElement("w:color")
+        rt_color.set(qn("w:val"), ruby_color)
+        rt_rpr.append(rt_color)
+    # 縦書き特有：sz（欧文）は約1/3、szCs（和文）は本文と同値
+    rt_sz_elem = OxmlElement("w:sz")
+    rt_sz_elem.set(qn("w:val"), str(rt_sz))
+    rt_rpr.append(rt_sz_elem)
+    rt_szCs_elem = OxmlElement("w:szCs")
+    rt_szCs_elem.set(qn("w:val"), str(rt_szCs))
+    rt_rpr.append(rt_szCs_elem)
+    rt_run.append(rt_rpr)
+    rt_t = OxmlElement("w:t")
+    rt_t.text = ruby_text
+    if ruby_text.startswith(" ") or ruby_text.endswith(" "):
+        rt_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    rt_run.append(rt_t)
+    rt.append(rt_run)
+    ruby.append(rt)
+
+    ruby_base_elem = OxmlElement("w:rubyBase")
+    base_run = OxmlElement("w:r")
+    if rpr_elem is not None:
+        try:
+            base_run.append(deepcopy(rpr_elem))
+        except Exception:
+            pass
+    base_t = OxmlElement("w:t")
+    base_t.text = base_text
+    if base_text.startswith(" ") or base_text.endswith(" "):
+        base_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    base_run.append(base_t)
+    ruby_base_elem.append(base_run)
+    ruby.append(ruby_base_elem)
+    return ruby
+
+
+def detect_text_direction(file_bytes):
+    """
+    docx ファイルの書き方向を自動検出する。
+    sectPr の textDirection が tbRl なら縦書き。
+    戻り値: 'tate' or 'yoko'
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    try:
+        doc = Document(io.BytesIO(file_bytes))
+        body = doc.element.body
+        sect = body.find(f"{{{W}}}sectPr")
+        if sect is not None:
+            td = sect.find(f"{{{W}}}textDirection")
+            if td is not None:
+                val = td.get(f"{{{W}}}val", "")
+                if val in ("tbRl", "tbLr", "btLr"):
+                    return "tate"
+    except Exception:
+        pass
+    return "yoko"
+
 # ────────────────────────────────────────────────
 # 段落・ファイル処理
 # ────────────────────────────────────────────────
 
-def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black"):
+def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False):
     text = run.text
     if not text or not contains_kanji(text):
         return None
@@ -407,7 +535,10 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
     new_elements = []
     for seg_text, reading in segments:
         if reading is not None:
-            ruby_elem = make_ruby_element(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode)
+            if tate:
+                ruby_elem = make_ruby_element_tate(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode)
+            else:
+                ruby_elem = make_ruby_element(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode)
             new_elements.append(ruby_elem)
         else:
             plain_run = deepcopy(run._r)
@@ -418,9 +549,9 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
             new_elements.append(plain_run)
     return new_elements
 
-def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black"):
+def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False):
     for run in para.runs:
-        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode)
+        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode, tate)
         if new_elems is None:
             continue
         r_elem = run._r
@@ -432,7 +563,7 @@ def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, t
         for i, elem in enumerate(new_elems):
             parent.insert(idx + i, elem)
 
-def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black"):
+def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
     from docx.text.paragraph import Paragraph as DocxParagraph
@@ -442,7 +573,7 @@ def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, th
     for txbx in txbx_contents:
         for p_elem in txbx.findall(f"{{{W}}}p"):
             para = DocxParagraph(p_elem, doc)
-            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode)
+            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate)
 
 def get_doc_default_font_size(doc):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -457,18 +588,18 @@ def get_doc_default_font_size(doc):
         pass
     return DEFAULT_BASE_TEXT_SIZE
 
-def process_docx(file_bytes, filename, tok, color_mode="black"):
+def process_docx(file_bytes, filename, tok, color_mode="black", tate=False):
     doc = Document(io.BytesIO(file_bytes))
     doc_default_hpt = get_doc_default_font_size(doc)
     theme_fonts = get_theme_fonts(doc)
     for para in doc.paragraphs:
-        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode)
+        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode)
-    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode)
+                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate)
+    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode, tate)
     out = io.BytesIO()
     doc.save(out)
     out.seek(0)
@@ -498,6 +629,23 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     st.info(f"📄 ファイル名: {uploaded_file.name}")
 
+    # 書き方向の自動検出
+    file_bytes_preview = uploaded_file.read()
+    auto_direction = detect_text_direction(file_bytes_preview)
+    uploaded_file.seek(0)  # 読み直しのためにリセット
+
+    direction_default = 0 if auto_direction == "yoko" else 1
+    st.caption(f"🔍 自動検出: {'横書き' if auto_direction == 'yoko' else '縦書き'}")
+
+    # 書き方向の選択
+    direction_choice = st.radio(
+        "書き方向",
+        options=["yoko", "tate"],
+        format_func=lambda x: "↔️ 横書き" if x == "yoko" else "↕️ 縦書き",
+        index=direction_default,
+        horizontal=True,
+    )
+
     # ルビ色の選択
     color_choice = st.radio(
         "ルビの文字色",
@@ -510,7 +658,8 @@ if uploaded_file is not None:
         with st.spinner("処理中です..."):
             try:
                 file_bytes = uploaded_file.read()
-                result = process_docx(file_bytes, uploaded_file.name, tok, color_mode=color_choice)
+                tate = (direction_choice == "tate")
+                result = process_docx(file_bytes, uploaded_file.name, tok, color_mode=color_choice, tate=tate)
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 stem = Path(uploaded_file.name).stem
