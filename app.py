@@ -78,20 +78,17 @@ def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
 
 def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24):
     """
-    縦書き用ルビパラメータ。
-    実ファイル解析より：
-      hpsBaseText = sz（横書きと同じ）
-      hps         = ceil(szCs / 2)  ← szCs基準
+    縦書き用ルビパラメータ。実ファイル解析より：
+      hpsBaseText = sz（またはフォールバック）
+      hps         = ceil(szCs / 2)  szCsがNoneならsz//2
       hpsRaise    = 20固定
-      rt sz       = szCs // 3       ← 縦書き特有（約1/3）
-      rt szCs     = szCs            ← 本文と同値
     """
     sz   = sz_hpt   if sz_hpt   is not None else doc_default_hpt
-    szCs = szCs_hpt if szCs_hpt is not None else doc_default_hpt
+    szCs = szCs_hpt if szCs_hpt is not None else sz  # szCsがなければszで代用
 
     hps_base_text = sz
     hps = max(8, -(-szCs // 2))  # ceil(szCs/2)
-    hps_raise = 20               # 縦書きは固定
+    hps_raise = 20
     rt_sz   = max(7, szCs // 3)
     rt_szCs = szCs
     return hps, hps_raise, hps_base_text, rt_sz, rt_szCs
@@ -423,7 +420,11 @@ def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, r
 
 
 def make_ruby_element_tate(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black"):
-    """縦書き用ルビ要素生成（rt sz/szCs を縦書き仕様に設定）"""
+    """
+    縦書き用ルビ要素生成。
+    実ファイル解析より：rt に sz/szCs を指定しない（Wordがhpsから自動計算）
+    hpsBaseText = sz、hps = ceil(szCs/2)、hpsRaise = 20固定
+    """
     hps, hps_raise, hps_base_text, rt_sz, rt_szCs = get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt)
     font_info = get_run_font_info(rpr_elem, theme_fonts)
 
@@ -467,13 +468,7 @@ def make_ruby_element_tate(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_h
         rt_color = OxmlElement("w:color")
         rt_color.set(qn("w:val"), ruby_color)
         rt_rpr.append(rt_color)
-    # 縦書き特有：sz（欧文）は約1/3、szCs（和文）は本文と同値
-    rt_sz_elem = OxmlElement("w:sz")
-    rt_sz_elem.set(qn("w:val"), str(rt_sz))
-    rt_rpr.append(rt_sz_elem)
-    rt_szCs_elem = OxmlElement("w:szCs")
-    rt_szCs_elem.set(qn("w:val"), str(rt_szCs))
-    rt_rpr.append(rt_szCs_elem)
+    # 縦書きは sz/szCs を指定しない（Wordがhpsから自動計算）
     rt_run.append(rt_rpr)
     rt_t = OxmlElement("w:t")
     rt_t.text = ruby_text
