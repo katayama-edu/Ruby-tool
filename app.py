@@ -88,7 +88,7 @@ def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24):
 
     hps_base_text = sz
     hps = max(8, -(-szCs // 2))  # ceil(szCs/2)
-    hps_raise = 0  # 縦書きは文字に密着
+    hps_raise = 10  # 縦書き：文字との距離調整
     rt_sz   = max(7, szCs // 3)
     rt_szCs = szCs
     return hps, hps_raise, hps_base_text, rt_sz, rt_szCs
