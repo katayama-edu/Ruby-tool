@@ -75,7 +75,7 @@ st.markdown("""
   </div>
   <div>
     <h1 style="margin:0; font-size:2rem; font-weight:500;">自動ルビふりツール</h1>
-    <p style="margin:0; color:gray; font-size:0.9rem;">Word（.docx）ファイルの漢字にルビを自動付与します。付与後に内容をご確認ください。</p>
+    <p style="margin:0; color:gray; font-size:0.9rem;">Word（.docx）ファイルの漢字にルビを自動付与します</p>
   </div>
 </div>
 """, unsafe_allow_html=True)
