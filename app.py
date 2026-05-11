@@ -691,9 +691,9 @@ st.markdown("""
 <style>
 .rubifuri-kun {
     position: fixed;
-    bottom: 16px;
+    bottom: 60px;
     right: 16px;
-    width: 80px;
+    width: 120px;
     opacity: 0.88;
     z-index: 999;
     pointer-events: none;
