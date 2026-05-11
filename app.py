@@ -686,3 +686,51 @@ if uploaded_file is not None:
 
 st.divider()
 st.caption("ルビの読みはSudachiPy（全辞書）を使用しています。付与後に内容をご確認ください。")
+
+st.markdown("""
+<style>
+.rubifuri-kun {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    width: 80px;
+    opacity: 0.88;
+    z-index: 999;
+    pointer-events: none;
+}
+</style>
+<div class="rubifuri-kun">
+<svg width="100%" viewBox="0 0 680 500" xmlns="http://www.w3.org/2000/svg">
+  <line x1="308" y1="168" x2="295" y2="205" stroke="#555" stroke-width="2" stroke-dasharray="4,3"/>
+  <line x1="372" y1="168" x2="385" y2="205" stroke="#555" stroke-width="2" stroke-dasharray="4,3"/>
+  <rect x="225" y="205" width="230" height="210" rx="28" fill="#FFD93D" stroke="#333" stroke-width="3.5"/>
+  <path d="M228 270 Q175 280 168 330" fill="none" stroke="#FFD93D" stroke-width="20" stroke-linecap="round"/>
+  <path d="M228 270 Q175 280 168 330" fill="none" stroke="#333" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="167" cy="337" r="16" fill="#FFD93D" stroke="#333" stroke-width="3.5"/>
+  <path d="M452 260 Q500 230 510 185" fill="none" stroke="#FFD93D" stroke-width="20" stroke-linecap="round"/>
+  <path d="M452 260 Q500 230 510 185" fill="none" stroke="#333" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="512" cy="178" r="16" fill="#FFD93D" stroke="#333" stroke-width="3.5"/>
+  <ellipse cx="300" cy="278" rx="20" ry="22" fill="#333"/>
+  <ellipse cx="380" cy="278" rx="20" ry="22" fill="#333"/>
+  <ellipse cx="307" cy="271" rx="7" ry="8" fill="white"/>
+  <ellipse cx="387" cy="271" rx="7" ry="8" fill="white"/>
+  <ellipse cx="272" cy="308" rx="20" ry="13" fill="#FF9A8B" opacity="0.55"/>
+  <ellipse cx="408" cy="308" rx="20" ry="13" fill="#FF9A8B" opacity="0.55"/>
+  <path d="M302 328 Q340 355 378 328" fill="none" stroke="#333" stroke-width="3.5" stroke-linecap="round"/>
+  <rect x="268" y="408" width="42" height="62" rx="21" fill="#FFD93D" stroke="#333" stroke-width="3.5"/>
+  <rect x="370" y="408" width="42" height="62" rx="21" fill="#FFD93D" stroke="#333" stroke-width="3.5"/>
+  <ellipse cx="289" cy="469" rx="30" ry="16" fill="#333"/>
+  <ellipse cx="391" cy="469" rx="30" ry="16" fill="#333"/>
+  <circle cx="340" cy="108" r="62" fill="#FF6B9D" stroke="#333" stroke-width="3.5"/>
+  <ellipse cx="320" cy="97" rx="11" ry="13" fill="#333"/>
+  <ellipse cx="360" cy="97" rx="11" ry="13" fill="#333"/>
+  <ellipse cx="326" cy="91" rx="4.5" ry="5.5" fill="white"/>
+  <ellipse cx="366" cy="91" rx="4.5" ry="5.5" fill="white"/>
+  <ellipse cx="303" cy="112" rx="12" ry="8" fill="#FF9A8B" opacity="0.55"/>
+  <ellipse cx="377" cy="112" rx="12" ry="8" fill="#FF9A8B" opacity="0.55"/>
+  <path d="M320 125 Q340 140 360 125" fill="none" stroke="#333" stroke-width="2.5" stroke-linecap="round"/>
+  <ellipse cx="272" cy="118" rx="20" ry="14" fill="#FF6B9D" stroke="#333" stroke-width="3"/>
+  <ellipse cx="410" cy="95" rx="20" ry="14" fill="#FF6B9D" stroke="#333" stroke-width="3" transform="rotate(-25 410 95)"/>
+</svg>
+</div>
+""", unsafe_allow_html=True)
