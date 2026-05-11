@@ -658,7 +658,7 @@ if uploaded_file is not None:
             max_value=5,
             value=0,
             step=1,
-            help="0がデフォルト（推奨値17）。＋で離れる、－で近づく"
+            help="0がデフォルト\n＋で離れる　－で近づく"
         )
         hps_raise_tate = 17 + offset
 
