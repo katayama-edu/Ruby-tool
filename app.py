@@ -1049,23 +1049,37 @@ if uploaded_file is not None:
 
                 st.success("✅ 処理完了！ダウンロードを開始します...")
                 st.download_button(
-                    label="📥 ダウンロード",
+                    label="📥 ダウンロード（自動で始まらない場合）",
                     data=result,
                     file_name=out_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                     key="auto_dl",
                 )
-                # ダウンロードボタンを自動クリック
-                st.components.v1.html("""
+                # base64でエンコードしてJSで自動ダウンロード
+                import base64
+                b64 = base64.b64encode(result.read()).decode()
+                result.seek(0)
+                st.components.v1.html(f"""
                 <script>
-                setTimeout(function() {
-                    var doc = window.parent.document;
-                    var btns = doc.querySelectorAll('a[download], button[data-testid="stDownloadButton"]');
-                    if (btns.length > 0) {
-                        btns[btns.length - 1].click();
-                    }
-                }, 500);
+                (function() {{
+                    var data = atob("{b64}");
+                    var bytes = new Uint8Array(data.length);
+                    for (var i = 0; i < data.length; i++) {{
+                        bytes[i] = data.charCodeAt(i);
+                    }}
+                    var blob = new Blob([bytes], {{type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}});
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = "{out_name}";
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(function() {{
+                        URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                    }}, 1000);
+                }})();
                 </script>
                 """, height=0)
             except Exception as e:
