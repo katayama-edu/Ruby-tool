@@ -48,8 +48,8 @@ st.markdown("""
     <path d="M302 328 Q340 355 378 328" fill="none" stroke="#333" stroke-width="3.5" stroke-linecap="round"/>
     <rect x="268" y="408" width="42" height="62" rx="21" fill="#FFD93D" stroke="white" stroke-width="5"/>
     <rect x="370" y="408" width="42" height="62" rx="21" fill="#FFD93D" stroke="white" stroke-width="5"/>
-    <ellipse cx="289" cy="469" rx="30" ry="16" fill="#333"/>
-    <ellipse cx="391" cy="469" rx="30" ry="16" fill="#333"/>
+    <ellipse cx="289" cy="469" rx="30" ry="16" fill="#555" stroke="white" stroke-width="4"/>
+    <ellipse cx="391" cy="469" rx="30" ry="16" fill="#555" stroke="white" stroke-width="4"/>
     <circle cx="340" cy="108" r="62" fill="#FF6B9D" stroke="white" stroke-width="5"/>
     <ellipse cx="320" cy="97" rx="11" ry="13" fill="#333"/>
     <ellipse cx="360" cy="97" rx="11" ry="13" fill="#333"/>
@@ -829,8 +829,8 @@ st.markdown("""
   <path d="M302 328 Q340 355 378 328" fill="none" stroke="#333" stroke-width="3.5" stroke-linecap="round"/>
   <rect x="268" y="408" width="42" height="62" rx="21" fill="#FFD93D" stroke="white" stroke-width="5"/>
   <rect x="370" y="408" width="42" height="62" rx="21" fill="#FFD93D" stroke="white" stroke-width="5"/>
-  <ellipse cx="289" cy="469" rx="30" ry="16" fill="#333"/>
-  <ellipse cx="391" cy="469" rx="30" ry="16" fill="#333"/>
+  <ellipse cx="289" cy="469" rx="30" ry="16" fill="#555" stroke="white" stroke-width="4"/>
+  <ellipse cx="391" cy="469" rx="30" ry="16" fill="#555" stroke="white" stroke-width="4"/>
   <circle cx="340" cy="108" r="62" fill="#FF6B9D" stroke="white" stroke-width="5"/>
   <ellipse cx="320" cy="97" rx="11" ry="13" fill="#333"/>
   <ellipse cx="360" cy="97" rx="11" ry="13" fill="#333"/>
@@ -846,6 +846,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown(
-    "<p style='text-align:right; color:#bbb; font-size:0.72rem; margin-top:8px;'>Developed by 片山</p>",
+    "<p style='text-align:right; color:#bbb; font-size:0.72rem; margin-top:8px;'>Developed by かたやま</p>",
     unsafe_allow_html=True
 )
