@@ -650,6 +650,171 @@ def process_docx(file_bytes, filename, tok, color_mode="black", tate=False, hps_
     out.seek(0)
     return out
 
+
+# ────────────────────────────────────────────────
+# 片山モード専用処理
+# ────────────────────────────────────────────────
+
+# スタイルIDごとのhpsRaiseテーブル
+KATAYAMA_STYLE_HPSRAISE = {
+    None:  20,   # スタイルなし → \s\up 10
+    "a7":  20,   # 大問 リード文 → \s\up 10
+    "a":   24,   # 設問⑴⑵⑶ → \s\up 12
+    "a0":  24,   # 設問①②③ → \s\up 12
+}
+KATAYAMA_DEFAULT_HPSRAISE = 20  # 上記以外のスタイル
+
+
+def get_para_style_id(para):
+    """段落のスタイルIDを返す。なければNone。"""
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    ppr = para._p.find(f"{{{W}}}pPr")
+    if ppr is not None:
+        ps = ppr.find(f"{{{W}}}pStyle")
+        if ps is not None:
+            return ps.get(f"{{{W}}}val")
+    return None
+
+
+def find_page1_end_index(doc):
+    """
+    lastRenderedPageBreak を持つ最初の段落のインデックスを返す。
+    見つからなければ0（スキップなし）。
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    for i, para in enumerate(doc.paragraphs):
+        breaks = para._p.findall(f".//{{{W}}}lastRenderedPageBreak")
+        br_page = para._p.findall(f".//{{{W}}}br[@{{{W}}}type='page']")
+        if breaks or br_page:
+            return i
+    return 0
+
+
+def apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode):
+    """片山モード：スタイルIDに応じたhpsRaiseを適用"""
+    style_id = get_para_style_id(para)
+    hps_raise = KATAYAMA_STYLE_HPSRAISE.get(style_id, KATAYAMA_DEFAULT_HPSRAISE)
+
+    for run in para.runs:
+        text = run.text
+        if not text or not contains_kanji(text):
+            continue
+        sz_hpt, szCs_hpt = get_run_sz_szcs(run._r)
+        rpr_elem = run._r.find(qn("w:rPr"))
+
+        # hps/hpsBaseTextは通常通り計算、hpsRaiseだけスタイル指定値を使う
+        if sz_hpt is not None:
+            base = sz_hpt
+        elif szCs_hpt is not None:
+            base = szCs_hpt
+        else:
+            base = doc_default_hpt
+        hps = max(8, base // 2)
+        hps_base_text = base
+
+        segments = get_ruby_segments(text, tok)
+        new_elements = []
+        for seg_text, reading in segments:
+            if reading is not None:
+                font_info = get_run_font_info(rpr_elem, theme_fonts)
+                ea_font = font_info['eastAsia'] or DEFAULT_RUBY_FONT
+                ruby_color = get_run_color(rpr_elem) if color_mode == "match" else None
+
+                ruby = OxmlElement("w:ruby")
+                ruby_pr = OxmlElement("w:rubyPr")
+                for tag, val in [("w:rubyAlign", "distributeSpace"), ("w:hps", str(hps)),
+                                  ("w:hpsRaise", str(hps_raise)), ("w:hpsBaseText", str(hps_base_text)),
+                                  ("w:lid", "ja-JP")]:
+                    e = OxmlElement(tag)
+                    attr = "w:val" if tag != "w:rubyAlign" else "w:val"
+                    if tag == "w:rubyAlign":
+                        e.set(qn("w:val"), val)
+                    elif tag == "w:lid":
+                        e.set(qn("w:val"), val)
+                    else:
+                        e.set(qn("w:val"), val)
+                    ruby_pr.append(e)
+                ruby.append(ruby_pr)
+
+                rt = OxmlElement("w:rt")
+                rt_run = OxmlElement("w:r")
+                rt_rpr = OxmlElement("w:rPr")
+                rt_rfonts = OxmlElement("w:rFonts")
+                rt_rfonts.set(qn("w:ascii"), ea_font)
+                rt_rfonts.set(qn("w:hAnsi"), ea_font)
+                rt_rfonts.set(qn("w:eastAsia"), ea_font)
+                rt_rpr.append(rt_rfonts)
+                if ruby_color:
+                    rc = OxmlElement("w:color")
+                    rc.set(qn("w:val"), ruby_color)
+                    rt_rpr.append(rc)
+                for sz_tag in ("w:sz", "w:szCs"):
+                    se = OxmlElement(sz_tag)
+                    se.set(qn("w:val"), str(hps))
+                    rt_rpr.append(se)
+                rt_run.append(rt_rpr)
+                rt_t = OxmlElement("w:t")
+                rt_t.text = reading
+                rt_run.append(rt_t)
+                rt.append(rt_run)
+                ruby.append(rt)
+
+                ruby_base = OxmlElement("w:rubyBase")
+                base_run = OxmlElement("w:r")
+                if rpr_elem is not None:
+                    try:
+                        base_run.append(deepcopy(rpr_elem))
+                    except Exception:
+                        pass
+                base_t = OxmlElement("w:t")
+                base_t.text = seg_text
+                base_run.append(base_t)
+                ruby_base.append(base_run)
+                ruby.append(ruby_base)
+                new_elements.append(ruby)
+            else:
+                plain_run = deepcopy(run._r)
+                for t in plain_run.findall(qn("w:t")):
+                    t.text = seg_text
+                new_elements.append(plain_run)
+
+        r_elem = run._r
+        parent = r_elem.getparent()
+        if parent is None:
+            continue
+        idx = list(parent).index(r_elem)
+        parent.remove(r_elem)
+        for i, elem in enumerate(new_elements):
+            parent.insert(idx + i, elem)
+
+
+def process_docx_katayama(file_bytes, filename, tok, color_mode="black"):
+    """片山モード：1ページ目スキップ＋スタイル別hpsRaise"""
+    doc = Document(io.BytesIO(file_bytes))
+    doc_default_hpt = get_doc_default_font_size(doc)
+    theme_fonts = get_theme_fonts(doc)
+
+    # 1ページ目の終わりを検出
+    page1_end = find_page1_end_index(doc)
+
+    for i, para in enumerate(doc.paragraphs):
+        if i < page1_end:
+            continue  # 1ページ目はスキップ
+        apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode)
+
+    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode)
+
+    out = io.BytesIO()
+    doc.save(out)
+    out.seek(0)
+    return out
+
 # ────────────────────────────────────────────────
 # UI
 # ────────────────────────────────────────────────
@@ -660,6 +825,9 @@ try:
 except Exception as e:
     st.error(f"辞書の読み込みに失敗しました: {e}")
     st.stop()
+
+# 隠しコマンド：クエリパラメータで片山モード検出
+katayama_mode = st.query_params.get("mode") == "katayama"
 
 st.divider()
 
@@ -710,12 +878,22 @@ if uploaded_file is not None:
         )
         hps_raise_tate = 17 + offset
 
+    # 片山モード表示
+    if katayama_mode:
+        st.markdown(
+            "<p style='color:#FF6B9D; font-size:0.8rem;'>✨ 片山モード：スタイル別設定・１ページ目スキップ</p>",
+            unsafe_allow_html=True
+        )
+
     if st.button("✨ ルビをふる", type="primary", use_container_width=True):
         with st.spinner("処理中です..."):
             try:
                 file_bytes = uploaded_file.read()
-                tate = (direction_choice == "tate")
-                result = process_docx(file_bytes, uploaded_file.name, tok, color_mode=color_choice, tate=tate, hps_raise_tate=hps_raise_tate)
+                if katayama_mode:
+                    result = process_docx_katayama(file_bytes, uploaded_file.name, tok, color_mode=color_choice)
+                else:
+                    tate = (direction_choice == "tate")
+                    result = process_docx(file_bytes, uploaded_file.name, tok, color_mode=color_choice, tate=tate, hps_raise_tate=hps_raise_tate)
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 stem = Path(uploaded_file.name).stem
@@ -831,11 +1009,10 @@ st.markdown("""
     width: 120px;
     opacity: 0.88;
     z-index: 999;
-    pointer-events: none;
-    /* ライトモード：薄い影で輪郭を際立たせる */
+    pointer-events: auto;
+    cursor: pointer;
     filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.25));
 }
-/* ダークモード：明るさを少し上げて見やすく */
 @media (prefers-color-scheme: dark) {
     .rubifuri-kun {
         opacity: 1.0;
@@ -843,7 +1020,7 @@ st.markdown("""
     }
 }
 </style>
-<div class="rubifuri-kun">
+<div class="rubifuri-kun" id="rubifuri-kun" onclick="handleClick()">
 <svg width="100%" viewBox="0 0 680 500" xmlns="http://www.w3.org/2000/svg">
   <line x1="308" y1="168" x2="295" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
   <line x1="372" y1="168" x2="385" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
@@ -877,6 +1054,25 @@ st.markdown("""
   <ellipse cx="410" cy="95" rx="20" ry="14" fill="#FF6B9D" stroke="white" stroke-width="4" transform="rotate(-25 410 95)"/>
 </svg>
 </div>
+<script>
+var _rk_count = 0;
+var _rk_timer = null;
+function handleClick() {
+    _rk_count++;
+    clearTimeout(_rk_timer);
+    if (_rk_count >= 3) {
+        _rk_count = 0;
+        var url = new URL(window.parent.location.href);
+        if (url.searchParams.get("mode") === "katayama") {
+            url.searchParams.delete("mode");
+        } else {
+            url.searchParams.set("mode", "katayama");
+        }
+        window.parent.location.href = url.toString();
+    }
+    _rk_timer = setTimeout(function(){ _rk_count = 0; }, 2000);
+}
+</script>
 """, unsafe_allow_html=True)
 
 st.markdown(
