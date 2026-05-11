@@ -76,7 +76,7 @@ def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
 # 縦書き：ルビ書式パラメータ
 # ────────────────────────────────────────────────
 
-def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24):
+def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24, hps_raise_tate=13):
     """
     縦書き用ルビパラメータ。実ファイル解析より：
       hpsBaseText = sz（またはフォールバック）
@@ -88,7 +88,7 @@ def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24):
 
     hps_base_text = sz
     hps = max(8, -(-szCs // 2))  # ceil(szCs/2)
-    hps_raise = 10  # 縦書き：文字との距離調整
+    hps_raise = hps_raise_tate  # 縦書き：UIから調整可能
     rt_sz   = max(7, szCs // 3)
     rt_szCs = szCs
     return hps, hps_raise, hps_base_text, rt_sz, rt_szCs
@@ -419,13 +419,13 @@ def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, r
     return ruby
 
 
-def make_ruby_element_tate(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black"):
+def make_ruby_element_tate(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black", hps_raise_tate=13):
     """
     縦書き用ルビ要素生成。
     実ファイル解析より：rt に sz/szCs を指定しない（Wordがhpsから自動計算）
-    hpsBaseText = sz、hps = ceil(szCs/2)、hpsRaise = 20固定
+    hpsBaseText = sz、hps = ceil(szCs/2)、hpsRaise = UIで調整可能
     """
-    hps, hps_raise, hps_base_text, rt_sz, rt_szCs = get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt)
+    hps, hps_raise, hps_base_text, rt_sz, rt_szCs = get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt, hps_raise_tate)
     font_info = get_run_font_info(rpr_elem, theme_fonts)
 
     ea_font    = font_info['eastAsia'] or DEFAULT_RUBY_FONT
@@ -520,7 +520,7 @@ def detect_text_direction(file_bytes):
 # 段落・ファイル処理
 # ────────────────────────────────────────────────
 
-def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False):
+def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=13):
     text = run.text
     if not text or not contains_kanji(text):
         return None
@@ -531,7 +531,7 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
     for seg_text, reading in segments:
         if reading is not None:
             if tate:
-                ruby_elem = make_ruby_element_tate(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode)
+                ruby_elem = make_ruby_element_tate(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode, hps_raise_tate)
             else:
                 ruby_elem = make_ruby_element(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode)
             new_elements.append(ruby_elem)
@@ -544,9 +544,9 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
             new_elements.append(plain_run)
     return new_elements
 
-def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False):
+def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=13):
     for run in para.runs:
-        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode, tate)
+        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
         if new_elems is None:
             continue
         r_elem = run._r
@@ -558,7 +558,7 @@ def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, t
         for i, elem in enumerate(new_elems):
             parent.insert(idx + i, elem)
 
-def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False):
+def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=13):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
     from docx.text.paragraph import Paragraph as DocxParagraph
@@ -568,7 +568,7 @@ def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, th
     for txbx in txbx_contents:
         for p_elem in txbx.findall(f"{{{W}}}p"):
             para = DocxParagraph(p_elem, doc)
-            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate)
+            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
 
 def get_doc_default_font_size(doc):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -583,18 +583,18 @@ def get_doc_default_font_size(doc):
         pass
     return DEFAULT_BASE_TEXT_SIZE
 
-def process_docx(file_bytes, filename, tok, color_mode="black", tate=False):
+def process_docx(file_bytes, filename, tok, color_mode="black", tate=False, hps_raise_tate=13):
     doc = Document(io.BytesIO(file_bytes))
     doc_default_hpt = get_doc_default_font_size(doc)
     theme_fonts = get_theme_fonts(doc)
     for para in doc.paragraphs:
-        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate)
+        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate)
-    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode, tate)
+                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
+    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
     out = io.BytesIO()
     doc.save(out)
     out.seek(0)
@@ -649,12 +649,24 @@ if uploaded_file is not None:
         horizontal=True,
     )
 
+    # 縦書きのみ：ルビ距離スライダー
+    hps_raise_tate = 13
+    if direction_choice == "tate":
+        hps_raise_tate = st.slider(
+            "ルビの距離（縦書き用）",
+            min_value=0,
+            max_value=30,
+            value=13,
+            step=1,
+            help="0に近いほど本文に密着、大きいほど離れます。デフォルト: 13"
+        )
+
     if st.button("✨ ルビをふる", type="primary", use_container_width=True):
         with st.spinner("処理中です..."):
             try:
                 file_bytes = uploaded_file.read()
                 tate = (direction_choice == "tate")
-                result = process_docx(file_bytes, uploaded_file.name, tok, color_mode=color_choice, tate=tate)
+                result = process_docx(file_bytes, uploaded_file.name, tok, color_mode=color_choice, tate=tate, hps_raise_tate=hps_raise_tate)
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 stem = Path(uploaded_file.name).stem
