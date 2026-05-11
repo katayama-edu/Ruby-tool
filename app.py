@@ -1092,25 +1092,31 @@ st.components.v1.html(f"""
   doc.body.appendChild(div);
 
   var count = 0, timer = null;
-  div.addEventListener('click', function() {{
-    count++;
-    div.style.transform = 'scale(1.15)';
-    setTimeout(function(){{ div.style.transform = 'scale(1)'; }}, 120);
-    clearTimeout(timer);
-    if (count >= 3) {{
-      count = 0;
-      var url = new URL(window.parent.location.href);
-      if (url.searchParams.get('mode') === 'katayama') {{
-        url.searchParams.delete('mode');
-      }} else {{
-        url.searchParams.set('mode', 'katayama');
-      }}
-      window.parent.location.href = url.toString();
-    }}
-    timer = setTimeout(function(){{ count = 0; }}, 2000);
-  }});
 
-  // ダークモード対応
+  // クリックハンドラを親コンテキストで実行
+  var parentFn = window.parent.Function('div', 'count_ref', `
+    return function() {{
+      count_ref.v++;
+      div.style.transform = 'scale(1.15)';
+      setTimeout(function(){{ div.style.transform = 'scale(1)'; }}, 120);
+      if (count_ref.v >= 3) {{
+        count_ref.v = 0;
+        var url = new URL(window.location.href);
+        if (url.searchParams.get('mode') === 'katayama') {{
+          url.searchParams.delete('mode');
+        }} else {{
+          url.searchParams.set('mode', 'katayama');
+        }}
+        window.location.href = url.toString();
+      }}
+      clearTimeout(count_ref.t);
+      count_ref.t = setTimeout(function(){{ count_ref.v = 0; }}, 2000);
+    }};
+  `);
+
+  var count_ref = {{v: 0, t: null}};
+  div.addEventListener('click', parentFn(div, count_ref));
+
   if (window.parent.matchMedia('(prefers-color-scheme: dark)').matches) {{
     div.style.opacity = '1.0';
     div.style.filter = 'drop-shadow(0px 0px 6px rgba(255,255,255,0.15)) brightness(1.1)';
