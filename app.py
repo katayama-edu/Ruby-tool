@@ -727,26 +727,38 @@ with st.expander("💬 ご意見・ご要望・不具合報告"):
         placeholder="例：〇〇のときにルビがうまく振られませんでした。／〇〇の機能を追加してほしいです。",
         key="feedback_msg"
     )
+
     if st.button("📨 送信する", key="feedback_btn"):
         if not feedback_msg.strip():
             st.warning("内容を入力してください。")
         else:
-            import urllib.request, urllib.parse
-            data = urllib.parse.urlencode({
+            import json as _json
+            payload = _json.dumps({
                 "name": feedback_name or "匿名",
                 "message": f"【{feedback_type}】\n\n{feedback_msg}",
                 "_subject": f"【ルビふりくん】{feedback_type}",
-            }).encode()
-            req = urllib.request.Request(
-                "https://formspree.io/f/mykolpee",
-                data=data,
-                headers={"Accept": "application/json"},
-            )
-            try:
-                urllib.request.urlopen(req)
-                st.success("✅ 送信しました。ありがとうございます！")
-            except Exception:
-                st.warning("送信に失敗しました。時間をおいて再度お試しください。")
+            })
+            st.components.v1.html(f"""
+            <script>
+            fetch("https://formspree.io/f/mykolpee", {{
+                method: "POST",
+                headers: {{"Content-Type": "application/json", "Accept": "application/json"}},
+                body: {payload!r}
+            }})
+            .then(r => r.json())
+            .then(data => {{
+                if (data.ok) {{
+                    document.getElementById("result").innerText = "✅ 送信しました。ありがとうございます！";
+                }} else {{
+                    document.getElementById("result").innerText = "❌ 送信に失敗しました: " + JSON.stringify(data);
+                }}
+            }})
+            .catch(e => {{
+                document.getElementById("result").innerText = "❌ 通信エラー: " + e;
+            }});
+            </script>
+            <p id="result" style="font-family:sans-serif; color:#444;">送信中...</p>
+            """, height=40)
 
 st.markdown("""
 <style>
