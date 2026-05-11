@@ -64,11 +64,22 @@ def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
         hps_raise = 20
     elif base <= 24:
         hps_raise = 24
-    elif base <= 36:
-        hps_raise = base
     else:
-        hps_raise = int(base * 1.2)
+        hps_raise = max(24, int(base * 0.6))
     return hps, hps_raise, hps_base_text
+
+
+def get_run_color(rpr_elem):
+    """<w:rPr> から文字色を取得する。戻り値: 16進カラーコード文字列 or None"""
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    if rpr_elem is None:
+        return None
+    color_elem = rpr_elem.find(f"{{{W}}}color")
+    if color_elem is not None:
+        val = color_elem.get(f"{{{W}}}val")
+        if val and val.upper() != "AUTO":
+            return val
+    return None
 
 # ────────────────────────────────────────────────
 # 漢字判定
@@ -247,16 +258,19 @@ def get_run_font_info(rpr_elem, theme_fonts=None):
 # ルビ要素生成
 # ────────────────────────────────────────────────
 
-def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None):
+def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black"):
     hps, hps_raise, hps_base_text = get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt)
     font_info = get_run_font_info(rpr_elem, theme_fonts)
 
-    # ルビフォントの決定：本文と同じフォントを使用
-    # eastAsia が解決できた場合はそれを使用、できない場合はデフォルト
     ea_font = font_info['eastAsia'] or DEFAULT_RUBY_FONT
     ruby_font  = ea_font
     ruby_ascii = font_info['ascii'] or ea_font
     ruby_hansi = font_info['hAnsi'] or ea_font
+
+    # ルビ色の決定
+    ruby_color = None
+    if color_mode == "match":
+        ruby_color = get_run_color(rpr_elem)  # 本文と同じ色（Noneなら黒）
 
     ruby = OxmlElement("w:ruby")
     ruby_pr = OxmlElement("w:rubyPr")
@@ -293,6 +307,11 @@ def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, r
         rt_spacing = OxmlElement("w:spacing")
         rt_spacing.set(qn("w:val"), font_info['spacing'])
         rt_rpr.append(rt_spacing)
+    # 色指定
+    if ruby_color:
+        rt_color = OxmlElement("w:color")
+        rt_color.set(qn("w:val"), ruby_color)
+        rt_rpr.append(rt_color)
     rt_sz = OxmlElement("w:sz")
     rt_sz.set(qn("w:val"), str(hps))
     rt_rpr.append(rt_sz)
@@ -338,7 +357,7 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
     new_elements = []
     for seg_text, reading in segments:
         if reading is not None:
-            ruby_elem = make_ruby_element(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts)
+            ruby_elem = make_ruby_element(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode)
             new_elements.append(ruby_elem)
         else:
             plain_run = deepcopy(run._r)
@@ -349,9 +368,9 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
             new_elements.append(plain_run)
     return new_elements
 
-def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None):
+def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black"):
     for run in para.runs:
-        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts)
+        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode)
         if new_elems is None:
             continue
         r_elem = run._r
@@ -363,7 +382,7 @@ def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, t
         for i, elem in enumerate(new_elems):
             parent.insert(idx + i, elem)
 
-def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None):
+def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black"):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
     from docx.text.paragraph import Paragraph as DocxParagraph
@@ -373,7 +392,7 @@ def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, th
     for txbx in txbx_contents:
         for p_elem in txbx.findall(f"{{{W}}}p"):
             para = DocxParagraph(p_elem, doc)
-            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts)
+            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode)
 
 def get_doc_default_font_size(doc):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -388,18 +407,18 @@ def get_doc_default_font_size(doc):
         pass
     return DEFAULT_BASE_TEXT_SIZE
 
-def process_docx(file_bytes, filename, tok):
+def process_docx(file_bytes, filename, tok, color_mode="black"):
     doc = Document(io.BytesIO(file_bytes))
     doc_default_hpt = get_doc_default_font_size(doc)
     theme_fonts = get_theme_fonts(doc)
     for para in doc.paragraphs:
-        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts)
+        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts)
-    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts)
+                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode)
+    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode)
     out = io.BytesIO()
     doc.save(out)
     out.seek(0)
@@ -429,11 +448,19 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     st.info(f"📄 ファイル名: {uploaded_file.name}")
 
+    # ルビ色の選択
+    color_choice = st.radio(
+        "ルビの文字色",
+        options=["black", "match"],
+        format_func=lambda x: "⬛ すべて黒色" if x == "black" else "🎨 本文の色に合わせる",
+        horizontal=True,
+    )
+
     if st.button("✨ ルビをふる", type="primary", use_container_width=True):
         with st.spinner("処理中です..."):
             try:
                 file_bytes = uploaded_file.read()
-                result = process_docx(file_bytes, uploaded_file.name, tok)
+                result = process_docx(file_bytes, uploaded_file.name, tok, color_mode=color_choice)
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 stem = Path(uploaded_file.name).stem
