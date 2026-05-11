@@ -75,7 +75,7 @@ st.markdown("""
   </div>
   <div>
     <h1 style="margin:0; font-size:2rem; font-weight:500;">自動ルビふりツール</h1>
-    <p style="margin:0; color:gray; font-size:0.9rem;">Word（.docx）ファイルの漢字にルビを自動付与します</p>
+    <p style="margin:0; color:gray; font-size:0.9rem;">Word（.docx）ファイルの漢字にルビを自動付与します。付与後に内容をご確認ください。</p>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -1092,8 +1092,6 @@ if st.session_state.get("result_bytes"):
     st.session_state.result_name = None
 
 st.divider()
-st.markdown("<p style='color:#ccc; font-size:0.7rem; text-align:center;'>ルビの読みは自動解析です。付与後に内容をご確認ください。</p>", unsafe_allow_html=True)
-
 st.markdown("<div style='margin-top:48px;'></div>", unsafe_allow_html=True)
 
 st.markdown("""
