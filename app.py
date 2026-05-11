@@ -64,8 +64,10 @@ def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
         hps_raise = 20
     elif base <= 24:
         hps_raise = 24
+    elif base <= 36:
+        hps_raise = base
     else:
-        hps_raise = int(base * 0.83)
+        hps_raise = int(base * 1.2)
     return hps, hps_raise, hps_base_text
 
 # ────────────────────────────────────────────────
