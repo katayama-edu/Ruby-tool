@@ -860,7 +860,7 @@ if "katayama_count" not in st.session_state:
 if "katayama_mode" not in st.session_state:
     st.session_state.katayama_mode = False
 
-katayama_mode = st.session_state.katayama_mode
+katayama_mode = st.query_params.get("mode") == "katayama"
 
 st.divider()
 
@@ -1033,26 +1033,13 @@ with st.expander("💬 ご意見・ご要望・不具合報告"):
             <p id="result" style="font-family:sans-serif; color:#444;">送信中...</p>
             """, height=40)
 
-st.markdown("""
-<style>
-.rubifuri-kun {
-    position: fixed;
-    bottom: 60px;
-    right: 16px;
-    width: 120px;
-    opacity: 0.88;
-    z-index: 999;
-    pointer-events: none;
-    filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.25));
-}
-@media (prefers-color-scheme: dark) {
-    .rubifuri-kun {
-        opacity: 1.0;
-        filter: drop-shadow(0px 0px 6px rgba(255,255,255,0.15)) brightness(1.1);
-    }
-}
-</style>
-<div class="rubifuri-kun">
+st.markdown(
+    "<p style='text-align:right; color:#bbb; font-size:0.72rem; margin-top:8px;'>Developed by かたやま</p>",
+    unsafe_allow_html=True
+)
+
+# ルビふりくんを親DOMに注入（クリック3回で片山モードON/OFF）
+_svg = """
 <svg width="100%" viewBox="0 0 680 500" xmlns="http://www.w3.org/2000/svg">
   <line x1="308" y1="168" x2="295" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
   <line x1="372" y1="168" x2="385" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
@@ -1085,38 +1072,49 @@ st.markdown("""
   <ellipse cx="272" cy="118" rx="20" ry="14" fill="#FF6B9D" stroke="white" stroke-width="4"/>
   <ellipse cx="410" cy="95" rx="20" ry="14" fill="#FF6B9D" stroke="white" stroke-width="4" transform="rotate(-25 410 95)"/>
 </svg>
-</div>
-""", unsafe_allow_html=True)
+"""
 
-st.markdown(
-    "<p style='text-align:right; color:#bbb; font-size:0.72rem; margin-top:8px;'>Developed by かたやま</p>",
-    unsafe_allow_html=True
-)
+st.components.v1.html(f"""
+<script>
+(function() {{
+  var doc = window.parent.document;
+  if (doc.getElementById('rubifuri-kun-fixed')) return;
 
-# 隠しボタン（ページ最下部・CSSで極限まで目立たなく）
-st.markdown("""
-<style>
-div[data-testid="stButton"] button[kind="secondary"]:has(+ *) { display: none; }
-.hidden-btn > div > button {
-    background: transparent !important;
-    border: none !important;
-    color: transparent !important;
-    box-shadow: none !important;
-    min-height: 8px !important;
-    padding: 0 !important;
-    width: 20px !important;
-}
-</style>
-""", unsafe_allow_html=True)
+  var div = doc.createElement('div');
+  div.id = 'rubifuri-kun-fixed';
+  div.style.cssText = [
+    'position:fixed', 'bottom:60px', 'right:16px', 'width:120px',
+    'opacity:0.88', 'z-index:9999', 'cursor:pointer',
+    'filter:drop-shadow(0px 2px 4px rgba(0,0,0,0.25))',
+    'transition:transform 0.1s'
+  ].join(';');
+  div.innerHTML = `{_svg}`;
+  doc.body.appendChild(div);
 
-col1, col2 = st.columns([20, 1])
-with col2:
-    with st.container():
-        st.markdown('<div class="hidden-btn">', unsafe_allow_html=True)
-        if st.button("·", key="hidden_katayama"):
-            st.session_state.katayama_count += 1
-            if st.session_state.katayama_count >= 3:
-                st.session_state.katayama_mode = not st.session_state.katayama_mode
-                st.session_state.katayama_count = 0
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+  var count = 0, timer = null;
+  div.addEventListener('click', function() {{
+    count++;
+    div.style.transform = 'scale(1.15)';
+    setTimeout(function(){{ div.style.transform = 'scale(1)'; }}, 120);
+    clearTimeout(timer);
+    if (count >= 3) {{
+      count = 0;
+      var url = new URL(window.parent.location.href);
+      if (url.searchParams.get('mode') === 'katayama') {{
+        url.searchParams.delete('mode');
+      }} else {{
+        url.searchParams.set('mode', 'katayama');
+      }}
+      window.parent.location.href = url.toString();
+    }}
+    timer = setTimeout(function(){{ count = 0; }}, 2000);
+  }});
+
+  // ダークモード対応
+  if (window.parent.matchMedia('(prefers-color-scheme: dark)').matches) {{
+    div.style.opacity = '1.0';
+    div.style.filter = 'drop-shadow(0px 0px 6px rgba(255,255,255,0.15)) brightness(1.1)';
+  }}
+}})();
+</script>
+""", height=0)
