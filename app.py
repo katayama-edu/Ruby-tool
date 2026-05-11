@@ -1051,9 +1051,14 @@ if uploaded_file is not None:
                 stem = Path(uploaded_file.name).stem
                 out_name = f"ルビ版_{timestamp}_{stem}.docx"
 
-                st.session_state["result_bytes"] = result.read()
-                st.session_state["result_name"] = out_name
-
+                st.success("✅ 処理完了！")
+                st.download_button(
+                    label="📥 ダウンロード",
+                    data=result,
+                    file_name=out_name,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
                 with st.expander("🐛 不具合を報告する"):
@@ -1083,15 +1088,8 @@ if uploaded_file is not None:
                             st.warning("送信に失敗しました。時間をおいて再度お試しください。")
 
 if st.session_state.get("result_bytes"):
-    st.success("✅ 処理完了！")
-    st.download_button(
-        label="📥 ダウンロード",
-        data=st.session_state["result_bytes"],
-        file_name=st.session_state["result_name"],
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        use_container_width=True,
-        type="primary",
-    )
+    st.session_state.result_bytes = None
+    st.session_state.result_name = None
 
 st.divider()
 st.caption("ルビの読みはSudachiPy（全辞書）を使用しています。付与後に内容をご確認ください。")
