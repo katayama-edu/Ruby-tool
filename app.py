@@ -787,19 +787,34 @@ def find_page1_end_index(doc):
     return 0
 
 
-def apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode):
-    """片山モード：スタイルIDに応じたhpsRaiseを適用"""
+def get_run_style_id(run):
+    """runの文字スタイルIDを返す"""
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    rpr = run._r.find(f"{{{W}}}rPr")
+    if rpr is not None:
+        rs = rpr.find(f"{{{W}}}rStyle")
+        if rs is not None:
+            return rs.get(f"{{{W}}}val")
+    return None
+
+
+def apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode, styles_elem=None):
+    """片山モード：スタイルIDに応じたhpsRaiseを適用、runスタイルのスキップも対応"""
     style_id = get_para_style_id(para)
     hps_raise = KATAYAMA_STYLE_HPSRAISE.get(style_id, KATAYAMA_DEFAULT_HPSRAISE)
 
     for run in para.runs:
+        # runの文字スタイルがスキップ対象なら除外（例：a5=出典）
+        run_style_id = get_run_style_id(run)
+        if run_style_id in KATAYAMA_SKIP_STYLE_IDS:
+            continue
+
         text = run.text
         if not text or not contains_kanji(text):
             continue
         sz_hpt, szCs_hpt = get_run_sz_szcs(run._r)
         rpr_elem = run._r.find(qn("w:rPr"))
 
-        # hps/hpsBaseTextは通常通り計算、hpsRaiseだけスタイル指定値を使う
         if sz_hpt is not None:
             base = sz_hpt
         elif szCs_hpt is not None:
@@ -809,27 +824,22 @@ def apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, co
         hps = max(8, base // 2)
         hps_base_text = base
 
+        # styles_elemを渡してフォント継承を解決
+        font_info = get_run_font_info(rpr_elem, theme_fonts, styles_elem)
+        ea_font = font_info['eastAsia'] or DEFAULT_RUBY_FONT
+        ruby_color = get_run_color(rpr_elem) if color_mode == "match" else None
+
         segments = get_ruby_segments(text, tok)
         new_elements = []
         for seg_text, reading in segments:
             if reading is not None:
-                font_info = get_run_font_info(rpr_elem, theme_fonts)
-                ea_font = font_info['eastAsia'] or DEFAULT_RUBY_FONT
-                ruby_color = get_run_color(rpr_elem) if color_mode == "match" else None
-
                 ruby = OxmlElement("w:ruby")
                 ruby_pr = OxmlElement("w:rubyPr")
                 for tag, val in [("w:rubyAlign", "distributeSpace"), ("w:hps", str(hps)),
                                   ("w:hpsRaise", str(hps_raise)), ("w:hpsBaseText", str(hps_base_text)),
                                   ("w:lid", "ja-JP")]:
                     e = OxmlElement(tag)
-                    attr = "w:val" if tag != "w:rubyAlign" else "w:val"
-                    if tag == "w:rubyAlign":
-                        e.set(qn("w:val"), val)
-                    elif tag == "w:lid":
-                        e.set(qn("w:val"), val)
-                    else:
-                        e.set(qn("w:val"), val)
+                    e.set(qn("w:val"), val)
                     ruby_pr.append(e)
                 ruby.append(ruby_pr)
 
@@ -885,27 +895,61 @@ def apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, co
             parent.insert(idx + i, elem)
 
 
+def get_body_elements_after_page1(doc):
+    """
+    bodyの直接子要素を順番に走査し、最初のページ区切り以降の要素を返す。
+    テーブルを含む1ページ目スキップに対応。
+    戻り値: (after_elements, page_break_found)
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    body = doc.element.body
+    after = []
+    found = False
+    for child in body:
+        if found:
+            after.append(child)
+        else:
+            # この要素またはその子孫にページ区切りがあるか
+            if (child.findall(f".//{{{W}}}lastRenderedPageBreak") or
+                    child.findall(f".//{{{W}}}br[@{{{W}}}type='page']")):
+                found = True
+                after.append(child)  # ページ区切りを含む要素は含める
+    return after, found
+
+
 def process_docx_katayama(file_bytes, filename, tok, color_mode="black"):
     """片山モード：1ページ目スキップ＋スタイル別hpsRaise"""
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    from docx.text.paragraph import Paragraph as DocxParagraph
+    from docx.table import Table as DocxTable
+
     doc = Document(io.BytesIO(file_bytes))
     doc_default_hpt = get_doc_default_font_size(doc)
     theme_fonts = get_theme_fonts(doc)
+    styles_elem = doc.part.styles._element if doc.part.styles else None
 
-    # 1ページ目の終わりを検出
-    page1_end = find_page1_end_index(doc)
+    # 1ページ目以降のbody要素を取得
+    after_elements, found = get_body_elements_after_page1(doc)
 
-    for i, para in enumerate(doc.paragraphs):
-        if i < page1_end:
-            continue  # 1ページ目はスキップ
-        if should_skip_ruby_katayama(para, doc):
-            continue  # 出典・注などはスキップ
-        apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode)
+    if not found:
+        # ページ区切りが見つからない場合は全体を処理
+        after_elements = list(doc.element.body)
 
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode)
+    for elem in after_elements:
+        tag = elem.tag.split('}')[-1]
+        if tag == 'p':
+            para = DocxParagraph(elem, doc)
+            if should_skip_ruby_katayama(para, doc):
+                continue
+            apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode, styles_elem)
+        elif tag == 'tbl':
+            table = DocxTable(elem, doc)
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        if should_skip_ruby_katayama(para, doc):
+                            continue
+                        apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode, styles_elem)
 
     apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode)
 
