@@ -347,23 +347,82 @@ def get_theme_fonts(doc):
     return result
 
 
-def get_run_font_info(rpr_elem, theme_fonts=None):
+def resolve_font_from_style(style_id, styles_elem, theme_fonts=None, visited=None):
     """
-    <w:rPr> からフォント・kern・spacing 情報を返す。
-    eastAsiaTheme が指定されている場合はテーマフォントに解決する。
+    スタイル定義を再帰的に辿ってフォント情報を解決する。
+    basedOn による継承チェーンも辿る。
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    if not style_id or styles_elem is None:
+        return None
+    if visited is None:
+        visited = set()
+    if style_id in visited:
+        return None
+    visited.add(style_id)
+
+    for style in styles_elem.findall(f"{{{W}}}style"):
+        if style.get(f"{{{W}}}styleId") != style_id:
+            continue
+        rpr = style.find(f".//{{{W}}}rPr")
+        if rpr is not None:
+            rfonts = rpr.find(f"{{{W}}}rFonts")
+            if rfonts is not None:
+                ea = rfonts.get(f"{{{W}}}eastAsia")
+                ea_theme = rfonts.get(f"{{{W}}}eastAsiaTheme")
+                if ea:
+                    return {'eastAsia': ea,
+                            'ascii': rfonts.get(f"{{{W}}}ascii"),
+                            'hAnsi': rfonts.get(f"{{{W}}}hAnsi")}
+                elif ea_theme and theme_fonts:
+                    resolved = None
+                    if 'minor' in ea_theme.lower():
+                        resolved = theme_fonts.get('minor')
+                    elif 'major' in ea_theme.lower():
+                        resolved = theme_fonts.get('major')
+                    if resolved:
+                        return {'eastAsia': resolved, 'ascii': resolved, 'hAnsi': resolved}
+        # basedOn を再帰的に辿る
+        based_on = style.find(f"{{{W}}}basedOn")
+        if based_on is not None:
+            parent_id = based_on.get(f"{{{W}}}val")
+            result = resolve_font_from_style(parent_id, styles_elem, theme_fonts, visited)
+            if result:
+                return result
+    return None
+
+
+def get_style_font_info_by_id(style_id, styles_elem, theme_fonts=None):
+    """スタイル定義からフォント情報を取得する（後方互換用）"""
+    return resolve_font_from_style(style_id, styles_elem, theme_fonts)
+
+
+def get_run_font_info(rpr_elem, theme_fonts=None, styles_elem=None):
+    """
+    <w:rPr> からフォント情報を返す。
+    解決優先順位：
+      1. run直接のrFonts
+      2. rStyleのスタイル定義（basedOn継承含む）
+      3. テーマフォント
     """
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     info = {'eastAsia': None, 'ascii': None, 'hAnsi': None, 'kern': None, 'spacing': None}
     if rpr_elem is None:
         return info
+
+    # rStyleを先に取得
+    r_style_id = None
+    rs = rpr_elem.find(f"{{{W}}}rStyle")
+    if rs is not None:
+        r_style_id = rs.get(f"{{{W}}}val")
+
+    # 1. run直接のrFonts
     rfonts = rpr_elem.find(f"{{{W}}}rFonts")
     if rfonts is not None:
         ea = rfonts.get(f"{{{W}}}eastAsia")
         ea_theme = rfonts.get(f"{{{W}}}eastAsiaTheme")
-        # eastAsia が直接指定されている場合はそのまま使用
         if ea:
             info['eastAsia'] = ea
-        # eastAsiaTheme でテーマフォントを参照している場合は解決する
         elif ea_theme and theme_fonts:
             if 'minor' in ea_theme.lower():
                 info['eastAsia'] = theme_fonts.get('minor')
@@ -371,6 +430,17 @@ def get_run_font_info(rpr_elem, theme_fonts=None):
                 info['eastAsia'] = theme_fonts.get('major')
         info['ascii'] = rfonts.get(f"{{{W}}}ascii")
         info['hAnsi'] = rfonts.get(f"{{{W}}}hAnsi")
+
+    # 2. フォント未解決ならrStyleの継承チェーンを辿る
+    if info['eastAsia'] is None and r_style_id and styles_elem is not None:
+        style_font = resolve_font_from_style(r_style_id, styles_elem, theme_fonts)
+        if style_font:
+            info['eastAsia'] = style_font['eastAsia']
+            if not info['ascii']:
+                info['ascii'] = style_font.get('ascii')
+            if not info['hAnsi']:
+                info['hAnsi'] = style_font.get('hAnsi')
+
     kern = rpr_elem.find(f"{{{W}}}kern")
     if kern is not None:
         info['kern'] = kern.get(f"{{{W}}}val")
@@ -383,9 +453,9 @@ def get_run_font_info(rpr_elem, theme_fonts=None):
 # ルビ要素生成
 # ────────────────────────────────────────────────
 
-def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black"):
+def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black", styles_elem=None):
     hps, hps_raise, hps_base_text = get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt)
-    font_info = get_run_font_info(rpr_elem, theme_fonts)
+    font_info = get_run_font_info(rpr_elem, theme_fonts, styles_elem)
 
     ea_font = font_info['eastAsia'] or DEFAULT_RUBY_FONT
     ruby_font  = ea_font
@@ -570,7 +640,7 @@ def detect_text_direction(file_bytes):
 # 段落・ファイル処理
 # ────────────────────────────────────────────────
 
-def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17):
+def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17, styles_elem=None):
     text = run.text
     if not text or not contains_kanji(text):
         return None
@@ -583,7 +653,7 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
             if tate:
                 ruby_elem = make_ruby_element_tate(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode, hps_raise_tate)
             else:
-                ruby_elem = make_ruby_element(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode)
+                ruby_elem = make_ruby_element(seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts, color_mode, styles_elem)
             new_elements.append(ruby_elem)
         else:
             plain_run = deepcopy(run._r)
@@ -594,9 +664,9 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
             new_elements.append(plain_run)
     return new_elements
 
-def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17):
+def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17, styles_elem=None):
     for run in para.runs:
-        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
+        new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate, styles_elem)
         if new_elems is None:
             continue
         r_elem = run._r
@@ -608,7 +678,7 @@ def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, t
         for i, elem in enumerate(new_elems):
             parent.insert(idx + i, elem)
 
-def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17):
+def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17, styles_elem=None):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
     from docx.text.paragraph import Paragraph as DocxParagraph
@@ -618,7 +688,7 @@ def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, th
     for txbx in txbx_contents:
         for p_elem in txbx.findall(f"{{{W}}}p"):
             para = DocxParagraph(p_elem, doc)
-            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
+            apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate, styles_elem)
 
 def get_doc_default_font_size(doc):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -637,14 +707,15 @@ def process_docx(file_bytes, filename, tok, color_mode="black", tate=False, hps_
     doc = Document(io.BytesIO(file_bytes))
     doc_default_hpt = get_doc_default_font_size(doc)
     theme_fonts = get_theme_fonts(doc)
+    styles_elem = doc.part.styles._element if doc.part.styles else None
     for para in doc.paragraphs:
-        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
+        apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate, styles_elem)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
-    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
+                    apply_ruby_to_paragraph(para, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate, styles_elem)
+    apply_ruby_to_textboxes(doc, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate, styles_elem)
     out = io.BytesIO()
     doc.save(out)
     out.seek(0)
@@ -666,7 +737,7 @@ KATAYAMA_DEFAULT_HPSRAISE = 20
 
 # ルビをスキップするスタイル名キーワード（出典・注など）
 KATAYAMA_SKIP_STYLE_KEYWORDS = ["出典", "source", "citation", "注", "footer", "フッター"]
-KATAYAMA_SKIP_STYLE_IDS = {"af0", "af1"}  # footer系
+KATAYAMA_SKIP_STYLE_IDS = {"af0", "af1", "a5"}  # footer系・Subtle Reference（出典）
 
 
 def get_para_style_id(para):
