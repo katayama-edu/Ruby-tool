@@ -826,8 +826,22 @@ except Exception as e:
     st.error(f"辞書の読み込みに失敗しました: {e}")
     st.stop()
 
-# 隠しコマンド：クエリパラメータで片山モード検出
-katayama_mode = st.query_params.get("mode") == "katayama"
+# 片山モード：セッション状態で管理
+if "katayama_count" not in st.session_state:
+    st.session_state.katayama_count = 0
+if "katayama_mode" not in st.session_state:
+    st.session_state.katayama_mode = False
+
+# 隠しボタン（右下キャラの近く・目立たない）
+col1, col2, col3 = st.columns([10, 1, 1])
+with col3:
+    if st.button("　", key="hidden_katayama", help=""):
+        st.session_state.katayama_count += 1
+        if st.session_state.katayama_count >= 3:
+            st.session_state.katayama_mode = not st.session_state.katayama_mode
+            st.session_state.katayama_count = 0
+
+katayama_mode = st.session_state.katayama_mode
 
 st.divider()
 
@@ -1009,8 +1023,7 @@ st.markdown("""
     width: 120px;
     opacity: 0.88;
     z-index: 999;
-    pointer-events: auto;
-    cursor: pointer;
+    pointer-events: none;
     filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.25));
 }
 @media (prefers-color-scheme: dark) {
@@ -1020,7 +1033,7 @@ st.markdown("""
     }
 }
 </style>
-<div class="rubifuri-kun" id="rubifuri-kun" onclick="handleClick()">
+<div class="rubifuri-kun">
 <svg width="100%" viewBox="0 0 680 500" xmlns="http://www.w3.org/2000/svg">
   <line x1="308" y1="168" x2="295" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
   <line x1="372" y1="168" x2="385" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
@@ -1054,25 +1067,6 @@ st.markdown("""
   <ellipse cx="410" cy="95" rx="20" ry="14" fill="#FF6B9D" stroke="white" stroke-width="4" transform="rotate(-25 410 95)"/>
 </svg>
 </div>
-<script>
-var _rk_count = 0;
-var _rk_timer = null;
-function handleClick() {
-    _rk_count++;
-    clearTimeout(_rk_timer);
-    if (_rk_count >= 3) {
-        _rk_count = 0;
-        var url = new URL(window.parent.location.href);
-        if (url.searchParams.get("mode") === "katayama") {
-            url.searchParams.delete("mode");
-        } else {
-            url.searchParams.set("mode", "katayama");
-        }
-        window.parent.location.href = url.toString();
-    }
-    _rk_timer = setTimeout(function(){ _rk_count = 0; }, 2000);
-}
-</script>
 """, unsafe_allow_html=True)
 
 st.markdown(
