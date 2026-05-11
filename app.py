@@ -974,6 +974,10 @@ if "katayama_count" not in st.session_state:
     st.session_state.katayama_count = 0
 if "katayama_mode" not in st.session_state:
     st.session_state.katayama_mode = False
+if "result_bytes" not in st.session_state:
+    st.session_state.result_bytes = None
+if "result_name" not in st.session_state:
+    st.session_state.result_name = None
 
 katayama_mode = st.query_params.get("mode") == "katayama"
 
@@ -1047,41 +1051,9 @@ if uploaded_file is not None:
                 stem = Path(uploaded_file.name).stem
                 out_name = f"ルビ版_{timestamp}_{stem}.docx"
 
-                st.success("✅ 処理完了！ダウンロードを開始します...")
-                st.download_button(
-                    label="📥 ダウンロード（自動で始まらない場合）",
-                    data=result,
-                    file_name=out_name,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                    key="auto_dl",
-                )
-                # base64でエンコードしてJSで自動ダウンロード
-                import base64
-                b64 = base64.b64encode(result.read()).decode()
-                result.seek(0)
-                st.components.v1.html(f"""
-                <script>
-                (function() {{
-                    var data = atob("{b64}");
-                    var bytes = new Uint8Array(data.length);
-                    for (var i = 0; i < data.length; i++) {{
-                        bytes[i] = data.charCodeAt(i);
-                    }}
-                    var blob = new Blob([bytes], {{type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}});
-                    var url = URL.createObjectURL(blob);
-                    var a = document.createElement("a");
-                    a.href = url;
-                    a.download = "{out_name}";
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(function() {{
-                        URL.revokeObjectURL(url);
-                        document.body.removeChild(a);
-                    }}, 1000);
-                }})();
-                </script>
-                """, height=0)
+                st.session_state["result_bytes"] = result.read()
+                st.session_state["result_name"] = out_name
+
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
                 with st.expander("🐛 不具合を報告する"):
@@ -1109,6 +1081,17 @@ if uploaded_file is not None:
                             st.success("✅ 報告を送信しました。ありがとうございます！")
                         except Exception:
                             st.warning("送信に失敗しました。時間をおいて再度お試しください。")
+
+if st.session_state.get("result_bytes"):
+    st.success("✅ 処理完了！")
+    st.download_button(
+        label="📥 ダウンロード",
+        data=st.session_state["result_bytes"],
+        file_name=st.session_state["result_name"],
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        use_container_width=True,
+        type="primary",
+    )
 
 st.divider()
 st.caption("ルビの読みはSudachiPy（全辞書）を使用しています。付与後に内容をご確認ください。")
