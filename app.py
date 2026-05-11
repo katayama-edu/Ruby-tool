@@ -347,7 +347,7 @@ def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, r
 # 段落・ファイル処理
 # ────────────────────────────────────────────────
 
-def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None):
+def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black"):
     text = run.text
     if not text or not contains_kanji(text):
         return None
