@@ -1047,14 +1047,27 @@ if uploaded_file is not None:
                 stem = Path(uploaded_file.name).stem
                 out_name = f"ルビ版_{timestamp}_{stem}.docx"
 
-                st.success("✅ 処理完了！")
+                st.success("✅ 処理完了！ダウンロードを開始します...")
                 st.download_button(
                     label="📥 ダウンロード",
                     data=result,
                     file_name=out_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
+                    key="auto_dl",
                 )
+                # ダウンロードボタンを自動クリック
+                st.components.v1.html("""
+                <script>
+                setTimeout(function() {
+                    var doc = window.parent.document;
+                    var btns = doc.querySelectorAll('a[download], button[data-testid="stDownloadButton"]');
+                    if (btns.length > 0) {
+                        btns[btns.length - 1].click();
+                    }
+                }, 500);
+                </script>
+                """, height=0)
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
                 with st.expander("🐛 不具合を報告する"):
