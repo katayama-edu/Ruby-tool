@@ -111,31 +111,86 @@ def kata_to_hira(text):
             result += ch
     return result
 
-def split_okuri(surface, reading):
-    okuri = ""
-    i = len(surface)
-    while i > 0:
-        ch = surface[i - 1]
-        cp = ord(ch)
-        if 0x3041 <= cp <= 0x3096:
-            okuri = ch + okuri
-            i -= 1
+def is_non_kanji_char(ch):
+    """漢字以外の文字か判定（ひらがな・カタカナ・英数字・記号など）"""
+    return not is_kanji(ch)
+
+def split_surface_reading(surface, reading):
+    """
+    表層形と読みを「漢字連続部分」と「非漢字部分」に分離し、
+    それぞれに対応する読みを割り当てる。
+
+    例:
+      "炭酸水素ナトリウム" / "たんさんすいそナトリウム"
+        → [("炭酸水素", "たんさんすいそ"), ("ナトリウム", None)]
+
+      "書く" / "かく"
+        → [("書", "か"), ("く", None)]
+
+      "二酸化炭素" / "にさんかたんそ"
+        → [("二酸化炭素", "にさんかたんそ")]
+    """
+    # surface を「漢字連続」と「非漢字連続」に分割
+    segments_surf = []
+    i = 0
+    while i < len(surface):
+        if is_kanji(surface[i]):
+            j = i
+            while j < len(surface) and is_kanji(surface[j]):
+                j += 1
+            segments_surf.append((surface[i:j], True))
+            i = j
         else:
-            break
-    kanji_part = surface[:i]
-    okuri_part = okuri
-    if not okuri_part:
-        return surface, "", reading
-    if reading.endswith(okuri_part):
-        reading_kanji = reading[: len(reading) - len(okuri_part)]
-    else:
-        return surface, "", reading
-    return kanji_part, okuri_part, reading_kanji
+            j = i
+            while j < len(surface) and not is_kanji(surface[j]):
+                j += 1
+            segments_surf.append((surface[i:j], False))
+            i = j
+
+    # 非漢字部分が読みに含まれているか確認して読みを分配する
+    result = []
+    remaining_reading = reading
+
+    for seg_text, is_k in segments_surf:
+        if not is_k:
+            # 非漢字部分（カタカナ・ひらがな等）
+            # 読みの先頭または末尾から対応部分を除去
+            seg_hira = kata_to_hira(seg_text)
+            if remaining_reading.startswith(seg_hira):
+                remaining_reading = remaining_reading[len(seg_hira):]
+            elif remaining_reading.endswith(seg_hira):
+                remaining_reading = remaining_reading[: len(remaining_reading) - len(seg_hira)]
+            result.append((seg_text, None))
+        else:
+            # 漢字部分：残りの読みのうち次の非漢字セグメントの読みを除いた部分を割り当て
+            # 次の非漢字セグメントを先読みして読みの末尾から除去
+            next_non_kanji = ""
+            idx = segments_surf.index((seg_text, True))
+            for next_seg, next_is_k in segments_surf[idx + 1:]:
+                if not next_is_k:
+                    next_non_kanji = kata_to_hira(next_seg)
+                    break
+
+            if next_non_kanji and remaining_reading.endswith(next_non_kanji):
+                kanji_reading = remaining_reading[: len(remaining_reading) - len(next_non_kanji)]
+                remaining_reading = next_non_kanji
+            else:
+                kanji_reading = remaining_reading
+                remaining_reading = ""
+
+            if kanji_reading and kanji_reading != seg_text:
+                result.append((seg_text, kanji_reading))
+            else:
+                result.append((seg_text, None))
+
+    return result
+
 
 def get_ruby_segments(text, tok):
     mode = tokenizer.Tokenizer.SplitMode.C
     morphemes = tok.tokenize(text, mode)
     segments = []
+
     for m in morphemes:
         surface = m.surface()
         if not contains_kanji(surface):
@@ -146,16 +201,11 @@ def get_ruby_segments(text, tok):
             segments.append((surface, None))
             continue
         hira = kata_to_hira(reading)
-        kanji_part, okuri_part, reading_kanji = split_okuri(surface, hira)
-        if not kanji_part or not contains_kanji(kanji_part):
-            segments.append((surface, None))
-            continue
-        if reading_kanji and reading_kanji != kanji_part:
-            segments.append((kanji_part, reading_kanji))
-        else:
-            segments.append((kanji_part, None))
-        if okuri_part:
-            segments.append((okuri_part, None))
+
+        # 漢字と非漢字が混在する場合（例：炭酸水素ナトリウム）を分離
+        sub_segs = split_surface_reading(surface, hira)
+        segments.extend(sub_segs)
+
     return segments
 
 # ────────────────────────────────────────────────
