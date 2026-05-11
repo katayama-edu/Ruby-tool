@@ -28,8 +28,19 @@ st.set_page_config(
 )
 
 st.markdown("""
+<style>
+.rubifuri-title-img {
+    filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.25));
+}
+@media (prefers-color-scheme: dark) {
+    .rubifuri-title-img {
+        filter: drop-shadow(0px 0px 6px rgba(255,255,255,0.15)) brightness(1.1);
+    }
+}
+</style>
 <div style="display:flex; align-items:center; gap:16px; margin-bottom:4px;">
-  <svg width="64" height="64" viewBox="140 40 400 450" xmlns="http://www.w3.org/2000/svg">
+  <div class="rubifuri-title-img">
+  <svg width="90" height="90" viewBox="140 40 400 450" xmlns="http://www.w3.org/2000/svg">
     <line x1="308" y1="168" x2="295" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
     <line x1="372" y1="168" x2="385" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
     <rect x="225" y="205" width="230" height="210" rx="28" fill="#FFD93D" stroke="white" stroke-width="5"/>
@@ -61,6 +72,7 @@ st.markdown("""
     <ellipse cx="272" cy="118" rx="20" ry="14" fill="#FF6B9D" stroke="white" stroke-width="4"/>
     <ellipse cx="410" cy="95" rx="20" ry="14" fill="#FF6B9D" stroke="white" stroke-width="4" transform="rotate(-25 410 95)"/>
   </svg>
+  </div>
   <div>
     <h1 style="margin:0; font-size:2rem; font-weight:500;">自動ルビふりツール</h1>
     <p style="margin:0; color:gray; font-size:0.9rem;">Word（.docx）ファイルの漢字にルビを自動付与します</p>
@@ -820,6 +832,15 @@ st.markdown("""
     opacity: 0.88;
     z-index: 999;
     pointer-events: none;
+    /* ライトモード：薄い影で輪郭を際立たせる */
+    filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.25));
+}
+/* ダークモード：明るさを少し上げて見やすく */
+@media (prefers-color-scheme: dark) {
+    .rubifuri-kun {
+        opacity: 1.0;
+        filter: drop-shadow(0px 0px 6px rgba(255,255,255,0.15)) brightness(1.1);
+    }
 }
 </style>
 <div class="rubifuri-kun">
