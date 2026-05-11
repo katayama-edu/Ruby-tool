@@ -76,7 +76,7 @@ def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
 # 縦書き：ルビ書式パラメータ
 # ────────────────────────────────────────────────
 
-def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24, hps_raise_tate=18):
+def get_ruby_params_tate(sz_hpt, szCs_hpt, doc_default_hpt=24, hps_raise_tate=17):
     """
     縦書き用ルビパラメータ。実ファイル解析より：
       hpsBaseText = sz（またはフォールバック）
@@ -419,7 +419,7 @@ def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, r
     return ruby
 
 
-def make_ruby_element_tate(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black", hps_raise_tate=18):
+def make_ruby_element_tate(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None, color_mode="black", hps_raise_tate=17):
     """
     縦書き用ルビ要素生成。
     実ファイル解析より：rt に sz/szCs を指定しない（Wordがhpsから自動計算）
@@ -520,7 +520,7 @@ def detect_text_direction(file_bytes):
 # 段落・ファイル処理
 # ────────────────────────────────────────────────
 
-def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=18):
+def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17):
     text = run.text
     if not text or not contains_kanji(text):
         return None
@@ -544,7 +544,7 @@ def process_run(run, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=No
             new_elements.append(plain_run)
     return new_elements
 
-def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=18):
+def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17):
     for run in para.runs:
         new_elems = process_run(run, tok, doc_default_hpt, theme_fonts, color_mode, tate, hps_raise_tate)
         if new_elems is None:
@@ -558,7 +558,7 @@ def apply_ruby_to_paragraph(para, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, t
         for i, elem in enumerate(new_elems):
             parent.insert(idx + i, elem)
 
-def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=18):
+def apply_ruby_to_textboxes(doc, tok, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None, color_mode="black", tate=False, hps_raise_tate=17):
     W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
     from docx.text.paragraph import Paragraph as DocxParagraph
@@ -583,7 +583,7 @@ def get_doc_default_font_size(doc):
         pass
     return DEFAULT_BASE_TEXT_SIZE
 
-def process_docx(file_bytes, filename, tok, color_mode="black", tate=False, hps_raise_tate=18):
+def process_docx(file_bytes, filename, tok, color_mode="black", tate=False, hps_raise_tate=17):
     doc = Document(io.BytesIO(file_bytes))
     doc_default_hpt = get_doc_default_font_size(doc)
     theme_fonts = get_theme_fonts(doc)
@@ -650,7 +650,7 @@ if uploaded_file is not None:
     )
 
     # 縦書きのみ：ルビ距離スライダー
-    hps_raise_tate = 18
+    hps_raise_tate = 17
     if direction_choice == "tate":
         offset = st.slider(
             "ルビの距離調整（縦書き用）",
@@ -658,9 +658,10 @@ if uploaded_file is not None:
             max_value=5,
             value=0,
             step=1,
-            help="0がデフォルト（推奨値18）。＋で離れる、－で近づく"
+            format="%d（0がデフォルト）",
+            help="0がデフォルト（推奨値17）。＋で離れる、－で近づく"
         )
-        hps_raise_tate = 18 + offset
+        hps_raise_tate = 17 + offset
 
     if st.button("✨ ルビをふる", type="primary", use_container_width=True):
         with st.spinner("処理中です..."):
