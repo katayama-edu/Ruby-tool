@@ -1,5 +1,653 @@
-streamlit
-python-docx
-sudachipy
-sudachidict-full
-lxml
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+ルビふりツール（Mac対応版 / SudachiPy使用）
+元の .docm マクロと同等の処理を Python で再現したスクリプトです。
+
+【ルビ書式ルール（実ファイル解析より）】
+  本文サイズに応じてルビサイズ・オフセットを自動調整します：
+    本文 12pt → ルビ 6pt、hpsRaise 10pt
+    本文 11pt → ルビ 5pt、hpsRaise 10pt
+    本文 10pt → ルビ 5pt、hpsRaise 9pt
+    本文  9pt → ルビ 4pt、hpsRaise 8pt
+    上記以外  → 本文サイズ÷2（切り捨て）、hpsRaise 10pt
+  rubyAlign: distributeSpace（均等配置）固定
+
+【必要なライブラリのインストール】
+  pip3 install python-docx sudachipy sudachidict-full
+
+【使い方】
+  python3 rubi_furi.py                    # GUIでファイル選択
+  python3 rubi_furi.py ファイル.docx      # 直接ファイル指定
+  python3 rubi_furi.py --folder フォルダ  # フォルダ内の全docxを処理
+
+【出力】
+  元ファイルと同じフォルダに「ルビ版_YYYYMMDD_HHMMSS_元ファイル名.docx」が保存されます。
+  元のファイルは変更されません。
+"""
+
+import sys
+import argparse
+from datetime import datetime
+from pathlib import Path
+from copy import deepcopy
+from lxml import etree
+
+try:
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+except ImportError:
+    print("❌ python-docx が見つかりません。以下を実行してください:")
+    print("   pip3 install python-docx")
+    sys.exit(1)
+
+try:
+    from sudachipy import tokenizer, dictionary
+except ImportError:
+    print("❌ sudachipy が見つかりません。以下を実行してください:")
+    print("   pip3 install sudachipy sudachidict-full")
+    sys.exit(1)
+
+
+# ────────────────────────────────────────────────
+# ルビ書式テーブル（実ファイル解析より）
+#
+# キー: (sz, szCs) ※半ポイント単位。Noneは未指定を意味する
+# 値:   (hps, hpsRaise, hpsBaseText)
+#
+# 判定ルール（解析結果より）:
+#   sz=24, szCs=None  → 大問文12pt → raise=20
+#   sz=24, szCs=32    → 大問文12pt（複合スクリプト大きめ）→ raise=20
+#   sz=None, szCs=None → スタイル継承12pt → raise=20
+#   sz=None, szCs=21  → 本文10pt（szCsのみ指定）→ raise=18
+#   sz=22, szCs=22    → 11pt → raise=20
+#   sz=18, szCs=21    → 9pt → raise=16
+#   sz=18, szCs=18    → 9pt → raise=16
+# ────────────────────────────────────────────────
+
+def get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt=24):
+    """
+    親 run の sz・szCs（半ポイント単位、未指定はNone）から
+    ルビ書式パラメータを返す。
+    戻り値: (hps, hpsRaise, hpsBaseText)  ※すべて半ポイント単位
+
+    hpsRaise は本文サイズに比例して自動調整：
+      〜20（10pt以下） → 20固定（\s\up 10）
+      21〜24（10〜12pt） → 24
+      25以上（12pt超） → base × 0.83（比例）
+    """
+    if sz_hpt is not None:
+        base = sz_hpt
+    elif szCs_hpt is not None:
+        base = szCs_hpt
+    else:
+        base = doc_default_hpt
+
+    hps_base_text = base
+    hps = max(8, base // 2)
+
+    if base <= 20:
+        hps_raise = 20
+    elif base <= 24:
+        hps_raise = 24
+    else:
+        hps_raise = int(base * 0.83)
+
+    return hps, hps_raise, hps_base_text
+
+
+# ────────────────────────────────────────────────
+# SudachiPy 初期化
+# ────────────────────────────────────────────────
+
+_tokenizer_obj = None
+
+def get_tokenizer():
+    global _tokenizer_obj
+    if _tokenizer_obj is None:
+        # 辞書を full → core → small の順で試みる
+        for dict_type in ("full", "core", "small"):
+            try:
+                _tokenizer_obj = dictionary.Dictionary(dict_type=dict_type).create()
+                print(f"  SudachiPy 辞書: {dict_type} を使用")
+                break
+            except Exception:
+                continue
+        if _tokenizer_obj is None:
+            # 辞書パスを直接指定して再試行
+            try:
+                import os, glob
+                base = os.path.expanduser(
+                    "~/Library/Python/3.9/lib/python/site-packages/sudachidict_full"
+                )
+                settings_candidates = glob.glob(os.path.join(base, "*.json"))
+                if settings_candidates:
+                    _tokenizer_obj = dictionary.Dictionary(
+                        config_path=settings_candidates[0]
+                    ).create()
+                    print(f"  SudachiPy 辞書: パス指定で読み込み成功")
+            except Exception as e:
+                print(f"❌ SudachiPy 辞書の読み込みに失敗しました: {e}")
+                print("   以下を実行して辞書をインストールしてください:")
+                print("   pip3 install sudachidict-full")
+                sys.exit(1)
+    return _tokenizer_obj
+
+
+def kata_to_hira(text):
+    """カタカナをひらがなに変換する"""
+    result = ""
+    for ch in text:
+        cp = ord(ch)
+        if 0x30A1 <= cp <= 0x30F6:
+            result += chr(cp - 0x60)
+        else:
+            result += ch
+    return result
+
+
+def split_okuri(surface, reading):
+    """
+    表層形と読みから、漢字部分・送り仮名部分・漢字の読みを分離する。
+    例: surface="書く"    reading="かく"       → ("書",  "く",   "か")
+        surface="勉強する" reading="べんきょうする" → ("勉強", "する", "べんきょう")
+        surface="美しい"  reading="うつくしい"   → ("美",  "しい", "うつく")
+    戻り値: (kanji_part, okuri_part, reading_for_kanji)
+    """
+    # surface 末尾のひらがな連続を送り仮名候補とする
+    okuri = ""
+    i = len(surface)
+    while i > 0:
+        ch = surface[i - 1]
+        cp = ord(ch)
+        if 0x3041 <= cp <= 0x3096:  # ひらがな
+            okuri = ch + okuri
+            i -= 1
+        else:
+            break
+
+    kanji_part = surface[:i]
+    okuri_part = okuri
+
+    if not okuri_part:
+        # 送り仮名なし → 全体が漢字部分
+        return surface, "", reading
+
+    # 読みの末尾が送り仮名と一致するか確認して除く
+    if reading.endswith(okuri_part):
+        reading_kanji = reading[: len(reading) - len(okuri_part)]
+    else:
+        # 一致しない場合は送り仮名分離を諦めて全体にルビ
+        return surface, "", reading
+
+    return kanji_part, okuri_part, reading_kanji
+
+
+def get_ruby_segments(text):
+    """
+    SudachiPy の形態素解析で [(表層形, 読み or None)] を返す。
+    読み が None → ルビ不要
+    読み が str  → ルビ付与対象（漢字部分のみ、送り仮名は除く）
+    """
+    tok = get_tokenizer()
+    mode = tokenizer.Tokenizer.SplitMode.C
+    morphemes = tok.tokenize(text, mode)
+    segments = []
+
+    for m in morphemes:
+        surface = m.surface()
+
+        # 漢字を含まない形態素はそのままルビなし
+        if not contains_kanji(surface):
+            segments.append((surface, None))
+            continue
+
+        reading = m.reading_form()
+        if not reading:
+            segments.append((surface, None))
+            continue
+
+        hira = kata_to_hira(reading)
+
+        # 送り仮名を分離
+        kanji_part, okuri_part, reading_kanji = split_okuri(surface, hira)
+
+        if not kanji_part or not contains_kanji(kanji_part):
+            segments.append((surface, None))
+            continue
+
+        # 漢字部分にルビを付与（読みが表層と異なる場合のみ）
+        if reading_kanji and reading_kanji != kanji_part:
+            segments.append((kanji_part, reading_kanji))
+        else:
+            segments.append((kanji_part, None))
+
+        # 送り仮名部分はルビなし
+        if okuri_part:
+            segments.append((okuri_part, None))
+
+    return segments
+
+
+# ────────────────────────────────────────────────
+# 漢字判定
+# ────────────────────────────────────────────────
+
+def is_kanji(char):
+    cp = ord(char)
+    return (
+        (0x4E00 <= cp <= 0x9FFF) or
+        (0x3400 <= cp <= 0x4DBF) or
+        (0x20000 <= cp <= 0x2A6DF) or
+        (0xF900 <= cp <= 0xFAFF)
+    )
+
+
+def contains_kanji(text):
+    return any(is_kanji(c) for c in text)
+
+
+# ────────────────────────────────────────────────
+# run からフォントサイズを取得
+# ────────────────────────────────────────────────
+
+def get_run_sz_szcs(run_elem):
+    """
+    <w:r> 要素から sz と szCs を半ポイント単位で別々に返す。
+    未指定の場合は None（スタイル継承を意味する）。
+    run 自身の rPr → 親段落の pPr/rPr の順で探す。
+    戻り値: (sz, szCs)
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    def read_pair(rpr_elem):
+        if rpr_elem is None:
+            return None, None
+        sz = szCs = None
+        sz_e = rpr_elem.find(f"{{{W}}}sz")
+        if sz_e is not None:
+            v = sz_e.get(f"{{{W}}}val")
+            if v:
+                sz = int(v)
+        szCs_e = rpr_elem.find(f"{{{W}}}szCs")
+        if szCs_e is not None:
+            v = szCs_e.get(f"{{{W}}}val")
+            if v:
+                szCs = int(v)
+        return sz, szCs
+
+    # 1. run 自身の rPr
+    rpr = run_elem.find(f"{{{W}}}rPr")
+    sz, szCs = read_pair(rpr)
+    if sz is not None or szCs is not None:
+        return sz, szCs
+
+    # 2. 親段落の pPr/rPr
+    parent = run_elem.getparent()
+    if parent is not None:
+        ppr = parent.find(f"{{{W}}}pPr")
+        if ppr is not None:
+            sz, szCs = read_pair(ppr.find(f"{{{W}}}rPr"))
+            if sz is not None or szCs is not None:
+                return sz, szCs
+
+    return None, None
+
+
+# ────────────────────────────────────────────────
+# 親runからフォント・レイアウト情報を取得
+# ────────────────────────────────────────────────
+
+def get_theme_fonts(doc):
+    """
+    theme1.xml から日本語フォント（majorFont/minorFont の Jpan）を取得する。
+    戻り値: {'major': str or None, 'minor': str or None}
+    """
+    A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    result = {'major': None, 'minor': None}
+    try:
+        theme_part = doc.part.part_related_by(
+            'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme'
+        )
+        root = etree.fromstring(theme_part.blob)
+        for kind in ('major', 'minor'):
+            tag = 'majorFont' if kind == 'major' else 'minorFont'
+            font_elem = root.find(f".//{{{A}}}{tag}")
+            if font_elem is not None:
+                for f in font_elem.findall(f"{{{A}}}font"):
+                    if f.get('script') == 'Jpan':
+                        result[kind] = f.get('typeface')
+                        break
+                if result[kind] is None:
+                    latin = font_elem.find(f"{{{A}}}latin")
+                    if latin is not None:
+                        result[kind] = latin.get('typeface')
+    except Exception:
+        pass
+    return result
+
+
+def get_run_font_info(rpr_elem, theme_fonts=None):
+    """
+    <w:rPr> からフォント・kern・spacing 情報を返す。
+    eastAsiaTheme が指定されている場合はテーマフォントに解決する。
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    info = {'eastAsia': None, 'ascii': None, 'hAnsi': None, 'kern': None, 'spacing': None}
+    if rpr_elem is None:
+        return info
+    rfonts = rpr_elem.find(f"{{{W}}}rFonts")
+    if rfonts is not None:
+        ea = rfonts.get(f"{{{W}}}eastAsia")
+        ea_theme = rfonts.get(f"{{{W}}}eastAsiaTheme")
+        if ea:
+            info['eastAsia'] = ea
+        elif ea_theme and theme_fonts:
+            if 'minor' in ea_theme.lower():
+                info['eastAsia'] = theme_fonts.get('minor')
+            elif 'major' in ea_theme.lower():
+                info['eastAsia'] = theme_fonts.get('major')
+        info['ascii'] = rfonts.get(f"{{{W}}}ascii")
+        info['hAnsi'] = rfonts.get(f"{{{W}}}hAnsi")
+    kern = rpr_elem.find(f"{{{W}}}kern")
+    if kern is not None:
+        info['kern'] = kern.get(f"{{{W}}}val")
+    spacing = rpr_elem.find(f"{{{W}}}spacing")
+    if spacing is not None:
+        info['spacing'] = spacing.get(f"{{{W}}}val")
+    return info
+
+
+# ────────────────────────────────────────────────
+# OOXML ルビ要素の生成
+# ────────────────────────────────────────────────
+
+DEFAULT_BASE_TEXT_SIZE = 24    # ドキュメントデフォルト本文サイズ（12pt、半ポイント単位）
+DEFAULT_RUBY_FONT = "游明朝"   # 明朝体のデフォルトルビフォント（フォント未指定runに使用）
+
+def make_ruby_element(base_text, ruby_text, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem=None, theme_fonts=None):
+    """
+    <w:ruby> 要素を生成する。
+    sz_hpt / szCs_hpt : 親runのsz・szCs（半ポイント単位、未指定はNone）
+    rpr_elem          : 親runの <w:rPr> lxml要素（フォント・kern・spacing継承用）
+    theme_fonts       : テーマフォント辞書 {'major': ..., 'minor': ...}
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    hps, hps_raise, hps_base_text = get_ruby_params(sz_hpt, szCs_hpt, doc_default_hpt)
+
+    font_info = get_run_font_info(rpr_elem, theme_fonts)
+
+    # ルビフォントの決定：本文と同じフォントを使用
+    ea_font = font_info['eastAsia'] or DEFAULT_RUBY_FONT
+    ruby_font  = ea_font
+    ruby_ascii = font_info['ascii'] or ea_font
+    ruby_hansi = font_info['hAnsi'] or ea_font
+
+    ruby = OxmlElement("w:ruby")
+
+    # rubyPr
+    ruby_pr = OxmlElement("w:rubyPr")
+    ruby_align = OxmlElement("w:rubyAlign")
+    ruby_align.set(qn("w:val"), "distributeSpace")
+    ruby_pr.append(ruby_align)
+    hps_elem = OxmlElement("w:hps")
+    hps_elem.set(qn("w:val"), str(hps))
+    ruby_pr.append(hps_elem)
+    hps_raise_elem = OxmlElement("w:hpsRaise")
+    hps_raise_elem.set(qn("w:val"), str(hps_raise))
+    ruby_pr.append(hps_raise_elem)
+    hps_base_elem = OxmlElement("w:hpsBaseText")
+    hps_base_elem.set(qn("w:val"), str(hps_base_text))
+    ruby_pr.append(hps_base_elem)
+    lid = OxmlElement("w:lid")
+    lid.set(qn("w:val"), "ja-JP")
+    ruby_pr.append(lid)
+    ruby.append(ruby_pr)
+
+    # rt（ルビテキスト）
+    rt = OxmlElement("w:rt")
+    rt_run = OxmlElement("w:r")
+    rt_rpr = OxmlElement("w:rPr")
+
+    # フォント指定
+    rt_rfonts = OxmlElement("w:rFonts")
+    rt_rfonts.set(qn("w:ascii"),    ruby_ascii)
+    rt_rfonts.set(qn("w:hAnsi"),    ruby_hansi)
+    rt_rfonts.set(qn("w:eastAsia"), ruby_font)
+    rt_rpr.append(rt_rfonts)
+
+    # kern継承（レイアウトずれ防止）
+    if font_info['kern'] is not None:
+        rt_kern = OxmlElement("w:kern")
+        rt_kern.set(qn("w:val"), font_info['kern'])
+        rt_rpr.append(rt_kern)
+
+    # spacing継承（レイアウトずれ防止）
+    if font_info['spacing'] is not None:
+        rt_spacing = OxmlElement("w:spacing")
+        rt_spacing.set(qn("w:val"), font_info['spacing'])
+        rt_rpr.append(rt_spacing)
+
+    # サイズ
+    rt_sz = OxmlElement("w:sz")
+    rt_sz.set(qn("w:val"), str(hps))
+    rt_rpr.append(rt_sz)
+    rt_sz_cs = OxmlElement("w:szCs")
+    rt_sz_cs.set(qn("w:val"), str(hps))
+    rt_rpr.append(rt_sz_cs)
+
+    rt_run.append(rt_rpr)
+    rt_t = OxmlElement("w:t")
+    rt_t.text = ruby_text
+    if ruby_text.startswith(" ") or ruby_text.endswith(" "):
+        rt_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    rt_run.append(rt_t)
+    rt.append(rt_run)
+    ruby.append(rt)
+
+    # rubyBase（本文）
+    ruby_base_elem = OxmlElement("w:rubyBase")
+    base_run = OxmlElement("w:r")
+    if rpr_elem is not None:
+        try:
+            inherited_rpr = deepcopy(rpr_elem)
+            base_run.append(inherited_rpr)
+        except Exception:
+            pass
+    base_t = OxmlElement("w:t")
+    base_t.text = base_text
+    if base_text.startswith(" ") or base_text.endswith(" "):
+        base_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    base_run.append(base_t)
+    ruby_base_elem.append(base_run)
+    ruby.append(ruby_base_elem)
+
+    return ruby
+
+
+# ────────────────────────────────────────────────
+# Run 処理・段落処理
+# ────────────────────────────────────────────────
+
+def process_run(run, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None):
+    text = run.text
+    if not text or not contains_kanji(text):
+        return None
+    sz_hpt, szCs_hpt = get_run_sz_szcs(run._r)
+    rpr_elem = run._r.find(qn("w:rPr"))
+    segments = get_ruby_segments(text)
+    new_elements = []
+    for seg_text, reading in segments:
+        if reading is not None:
+            ruby_elem = make_ruby_element(
+                seg_text, reading, sz_hpt, szCs_hpt, doc_default_hpt, rpr_elem, theme_fonts
+            )
+            new_elements.append(ruby_elem)
+        else:
+            plain_run = deepcopy(run._r)
+            for t in plain_run.findall(qn("w:t")):
+                t.text = seg_text
+                if seg_text.startswith(" ") or seg_text.endswith(" "):
+                    t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            new_elements.append(plain_run)
+    return new_elements
+
+
+def apply_ruby_to_paragraph(para, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None):
+    for run in para.runs:
+        new_elems = process_run(run, doc_default_hpt, theme_fonts)
+        if new_elems is None:
+            continue
+        r_elem = run._r
+        parent = r_elem.getparent()
+        if parent is None:
+            continue
+        idx = list(parent).index(r_elem)
+        parent.remove(r_elem)
+        for i, elem in enumerate(new_elems):
+            parent.insert(idx + i, elem)
+
+
+def apply_ruby_to_textboxes(doc, doc_default_hpt=DEFAULT_BASE_TEXT_SIZE, theme_fonts=None):
+    """
+    テキストボックス内の段落にルビを適用する。
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    from docx.text.paragraph import Paragraph as DocxParagraph
+    body = doc.element.body
+    txbx_contents = body.findall(f".//{{{W}}}txbxContent")
+    MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+    txbx_contents += body.findall(f".//{{{MC}}}Fallback//{{{W}}}txbxContent")
+    count = 0
+    for txbx in txbx_contents:
+        for p_elem in txbx.findall(f"{{{W}}}p"):
+            para = DocxParagraph(p_elem, doc)
+            apply_ruby_to_paragraph(para, doc_default_hpt, theme_fonts)
+            count += 1
+    if count:
+        print(f"  テキストボックス内: {count} 段落処理")
+
+
+# ────────────────────────────────────────────────
+# ドキュメントのデフォルトフォントサイズを取得
+# ────────────────────────────────────────────────
+
+def get_doc_default_font_size(doc):
+    """
+    styles.xml の rPrDefault/sz からドキュメントのデフォルトフォントサイズを取得する。
+    取得できなければ DEFAULT_BASE_TEXT_SIZE を返す。
+    """
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    try:
+        styles_part = doc.part.styles
+        root = styles_part._element
+        sz = root.find(f".//{{{W}}}rPrDefault/{{{W}}}rPr/{{{W}}}sz")
+        if sz is not None:
+            val = sz.get(f"{{{W}}}val")
+            if val:
+                return int(val)
+    except Exception:
+        pass
+    return DEFAULT_BASE_TEXT_SIZE
+
+
+# ────────────────────────────────────────────────
+# ファイル処理
+# ────────────────────────────────────────────────
+
+def process_file(input_path: Path) -> Path:
+    print(f"処理中: {input_path.name}")
+    doc = Document(str(input_path))
+
+    doc_default_hpt = get_doc_default_font_size(doc)
+    print(f"  ドキュメントデフォルトフォントサイズ: {doc_default_hpt//2}pt")
+
+    theme_fonts = get_theme_fonts(doc)
+    print(f"  テーマフォント: major={theme_fonts['major']} minor={theme_fonts['minor']}")
+
+    para_count = 0
+    for para in doc.paragraphs:
+        apply_ruby_to_paragraph(para, doc_default_hpt, theme_fonts)
+        para_count += 1
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    apply_ruby_to_paragraph(para, doc_default_hpt, theme_fonts)
+                    para_count += 1
+
+    apply_ruby_to_textboxes(doc, doc_default_hpt, theme_fonts)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_name = f"ルビ版_{timestamp}_{input_path.stem}.docx"
+    out_path = input_path.parent / out_name
+    doc.save(str(out_path))
+
+    print(f"✅ 保存完了: {out_path.name}  （{para_count} 段落処理）")
+    return out_path
+
+
+# ────────────────────────────────────────────────
+# エントリポイント
+# ────────────────────────────────────────────────
+
+def pick_file_gui():
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        paths = filedialog.askopenfilenames(
+            title="ルビをふる Word ファイルを選んでください",
+            filetypes=[("Word 文書", "*.docx *.docm"), ("すべて", "*.*")],
+        )
+        root.destroy()
+        return [Path(p) for p in paths]
+    except Exception as e:
+        print(f"GUIが開けませんでした ({e})。コマンドライン引数でファイルを指定してください。")
+        return []
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Word ファイルの漢字にルビを自動付与するツール（Mac 対応版 / SudachiPy）"
+    )
+    parser.add_argument("files", nargs="*", help="処理する .docx / .docm ファイル")
+    parser.add_argument("--folder", "-f", help="フォルダ内の全 .docx を一括処理")
+    args = parser.parse_args()
+
+    targets = []
+
+    if args.folder:
+        folder = Path(args.folder)
+        targets = sorted(folder.glob("*.docx")) + sorted(folder.glob("*.docm"))
+        if not targets:
+            print(f"⚠️  フォルダ内に .docx/.docm ファイルが見つかりません: {folder}")
+            return
+    elif args.files:
+        targets = [Path(f) for f in args.files]
+    else:
+        print("ファイル選択ダイアログを開きます...")
+        targets = pick_file_gui()
+        if not targets:
+            print("ファイルが選択されませんでした。終了します。")
+            return
+
+    processed = 0
+    for path in targets:
+        if not path.exists():
+            print(f"⚠️  ファイルが見つかりません: {path}")
+            continue
+        try:
+            process_file(path)
+            processed += 1
+        except Exception as e:
+            print(f"❌ エラー ({path.name}): {e}")
+
+    print(f"\n完了: {processed}/{len(targets)} ファイルを処理しました。")
+
+
+if __name__ == "__main__":
+    main()
