@@ -29,7 +29,7 @@ st.set_page_config(
 
 st.markdown("""
 <div style="display:flex; align-items:center; gap:16px; margin-bottom:4px;">
-  <svg width="64" height="64" viewBox="140 60 400 430" xmlns="http://www.w3.org/2000/svg">
+  <svg width="64" height="64" viewBox="140 40 400 450" xmlns="http://www.w3.org/2000/svg">
     <line x1="308" y1="168" x2="295" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
     <line x1="372" y1="168" x2="385" y2="205" stroke="#fff" stroke-width="2" stroke-dasharray="4,3"/>
     <rect x="225" y="205" width="230" height="210" rx="28" fill="#FFD93D" stroke="white" stroke-width="5"/>
@@ -749,6 +749,19 @@ st.divider()
 st.caption("ルビの読みはSudachiPy（全辞書）を使用しています。付与後に内容をご確認ください。")
 
 st.markdown("<div style='margin-top:48px;'></div>", unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+div[data-testid="stExpander"] {
+    border: 1px solid #ddd !important;
+    opacity: 0.65;
+}
+div[data-testid="stExpander"] summary {
+    font-size: 0.78rem !important;
+    color: #888 !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 with st.expander("💬 ご意見・ご要望・不具合報告"):
     st.markdown("<small>お気づきの点や改善のご要望、不具合などがあればお知らせください。<br>いただいた内容は開発者が確認し、ツールの改善に役立てます。</small>", unsafe_allow_html=True)
