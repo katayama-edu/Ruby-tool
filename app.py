@@ -22,12 +22,12 @@ from sudachipy import tokenizer, dictionary
 # ────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="ルビふりツール",
-    page_icon="📝",
+    page_title="自動ルビふりツール",
+    page_icon="✏️",
     layout="centered",
 )
 
-st.title("📝 ルビふりツール")
+st.title("✏️ 自動ルビふりツール")
 st.caption("Word（.docx）ファイルの漢字にルビを自動付与します")
 
 # ────────────────────────────────────────────────
@@ -604,15 +604,13 @@ def process_docx(file_bytes, filename, tok, color_mode="black", tate=False, hps_
 # UI
 # ────────────────────────────────────────────────
 
-# 辞書の読み込み
-with st.spinner("辞書を読み込んでいます（初回のみ時間がかかります）..."):
-    try:
-        tok = load_tokenizer()
-    except Exception as e:
-        st.error(f"辞書の読み込みに失敗しました: {e}")
-        st.stop()
+# 辞書を裏で読み込み（表示なし）
+try:
+    tok = load_tokenizer()
+except Exception as e:
+    st.error(f"辞書の読み込みに失敗しました: {e}")
+    st.stop()
 
-st.success("辞書の読み込み完了！")
 st.divider()
 
 uploaded_file = st.file_uploader(
@@ -683,6 +681,31 @@ if uploaded_file is not None:
                 )
             except Exception as e:
                 st.error(f"エラーが発生しました: {e}")
+                with st.expander("🐛 不具合を報告する"):
+                    st.write("以下の内容を送信すると、開発者に通知されます。")
+                    report_name = st.text_input("お名前（任意）", key="report_name")
+                    report_msg = st.text_area(
+                        "状況・コメント（任意）",
+                        value=f"エラー内容: {e}\nファイル名: {uploaded_file.name}",
+                        key="report_msg"
+                    )
+                    if st.button("📨 報告を送信", key="report_btn"):
+                        import urllib.request, urllib.parse, json as _json
+                        data = urllib.parse.urlencode({
+                            "name": report_name or "匿名",
+                            "message": report_msg,
+                            "_subject": "【ルビふりくん】不具合報告",
+                        }).encode()
+                        req = urllib.request.Request(
+                            "https://formspree.io/f/mykolpee",
+                            data=data,
+                            headers={"Accept": "application/json"},
+                        )
+                        try:
+                            urllib.request.urlopen(req)
+                            st.success("✅ 報告を送信しました。ありがとうございます！")
+                        except Exception:
+                            st.warning("送信に失敗しました。時間をおいて再度お試しください。")
 
 st.divider()
 st.caption("ルビの読みはSudachiPy（全辞書）を使用しています。付与後に内容をご確認ください。")
