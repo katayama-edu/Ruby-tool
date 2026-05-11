@@ -662,7 +662,11 @@ KATAYAMA_STYLE_HPSRAISE = {
     "a":   24,   # 設問⑴⑵⑶ → \s\up 12
     "a0":  24,   # 設問①②③ → \s\up 12
 }
-KATAYAMA_DEFAULT_HPSRAISE = 20  # 上記以外のスタイル
+KATAYAMA_DEFAULT_HPSRAISE = 20
+
+# ルビをスキップするスタイル名キーワード（出典・注など）
+KATAYAMA_SKIP_STYLE_KEYWORDS = ["出典", "source", "citation", "注", "footer", "フッター"]
+KATAYAMA_SKIP_STYLE_IDS = {"af0", "af1"}  # footer系
 
 
 def get_para_style_id(para):
@@ -674,6 +678,28 @@ def get_para_style_id(para):
         if ps is not None:
             return ps.get(f"{{{W}}}val")
     return None
+
+
+def should_skip_ruby_katayama(para, doc):
+    """片山モードでルビをスキップすべき段落かどうか判定"""
+    style_id = get_para_style_id(para)
+
+    # IDによるスキップ
+    if style_id in KATAYAMA_SKIP_STYLE_IDS:
+        return True
+
+    # スタイル名によるスキップ（出典・注など）
+    if style_id and doc.part.styles:
+        W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        for style in doc.part.styles._element.findall(f"{{{W}}}style"):
+            sid = style.get(f"{{{W}}}styleId")
+            if sid == style_id:
+                name_elem = style.find(f"{{{W}}}name")
+                if name_elem is not None:
+                    name = name_elem.get(f"{{{W}}}val", "")
+                    if any(kw in name for kw in KATAYAMA_SKIP_STYLE_KEYWORDS):
+                        return True
+    return False
 
 
 def find_page1_end_index(doc):
@@ -800,6 +826,8 @@ def process_docx_katayama(file_bytes, filename, tok, color_mode="black"):
     for i, para in enumerate(doc.paragraphs):
         if i < page1_end:
             continue  # 1ページ目はスキップ
+        if should_skip_ruby_katayama(para, doc):
+            continue  # 出典・注などはスキップ
         apply_ruby_to_paragraph_katayama(para, tok, doc_default_hpt, theme_fonts, color_mode)
 
     for table in doc.tables:
@@ -831,15 +859,6 @@ if "katayama_count" not in st.session_state:
     st.session_state.katayama_count = 0
 if "katayama_mode" not in st.session_state:
     st.session_state.katayama_mode = False
-
-# 隠しボタン（右下キャラの近く・目立たない）
-col1, col2, col3 = st.columns([10, 1, 1])
-with col3:
-    if st.button("　", key="hidden_katayama", help=""):
-        st.session_state.katayama_count += 1
-        if st.session_state.katayama_count >= 3:
-            st.session_state.katayama_mode = not st.session_state.katayama_mode
-            st.session_state.katayama_count = 0
 
 katayama_mode = st.session_state.katayama_mode
 
@@ -1073,3 +1092,31 @@ st.markdown(
     "<p style='text-align:right; color:#bbb; font-size:0.72rem; margin-top:8px;'>Developed by かたやま</p>",
     unsafe_allow_html=True
 )
+
+# 隠しボタン（ページ最下部・CSSで極限まで目立たなく）
+st.markdown("""
+<style>
+div[data-testid="stButton"] button[kind="secondary"]:has(+ *) { display: none; }
+.hidden-btn > div > button {
+    background: transparent !important;
+    border: none !important;
+    color: transparent !important;
+    box-shadow: none !important;
+    min-height: 8px !important;
+    padding: 0 !important;
+    width: 20px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+col1, col2 = st.columns([20, 1])
+with col2:
+    with st.container():
+        st.markdown('<div class="hidden-btn">', unsafe_allow_html=True)
+        if st.button("·", key="hidden_katayama"):
+            st.session_state.katayama_count += 1
+            if st.session_state.katayama_count >= 3:
+                st.session_state.katayama_mode = not st.session_state.katayama_mode
+                st.session_state.katayama_count = 0
+                st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
